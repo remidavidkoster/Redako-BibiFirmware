@@ -52,7 +52,7 @@
 /* USER CODE BEGIN PV */
 
 
-int pole_pairs = 7;
+int POLE_PAIRS = 7;
 float shaft_angle;
 
 
@@ -283,8 +283,11 @@ sensorXYZ gyro;
 sensorXYZ accelb;
 sensorXYZ gyrob;
 
-volatile float angle;
+int32_t ACC_FullRotations = 0;
+
 volatile float angleb;
+volatile float angleb_prev;
+volatile float anglebFull;
 
 
 uint8_t failed;
@@ -292,24 +295,31 @@ uint8_t failed;
 
 typedef struct {
     float p;
+    float i;
     float d;
 
     float error;
     float prev_error;
     float derivative;
+    float integral;
     float output;
 
     float dt;
     float alpha;  // Low-pass filter factor for the derivative term
 
+    float limit;
+
     float target;
+    float lastTarget;
 } PIDController;
 
 
 PIDController pid = {
-    .p = 0.000005f,
-    .d = -0.004f,
-    .alpha = 0.02f,  // Set this based on how much filtering you want
+	.p = 0.001f,
+	.i = 0.00002f,
+    .d = 0.0f,
+    .alpha = 0.001f,  // Set this based on how much filtering you want
+	.limit = 5.65f,
     .target = 0.0f
 };
 
@@ -317,22 +327,37 @@ float speed;
 
 #define ABS(x) ((x) < 0 ? -(x) : (x))
 
+float electricalAngle;
+
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM6) {
 
-        pid.error = angleb - pid.target;
+        pid.error = anglebFull - pid.target;
+
+    	if (pid.target != pid.lastTarget){
+    		pid.prev_error = pid.error;
+        	pid.lastTarget = pid.target;
+    	}
+
 
         // Derivative with low-pass filter
-        pid.derivative = pid.alpha * (pid.error - pid.prev_error) + (1 - pid.alpha) * pid.derivative;
+        pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
 
-        // PID output (I term removed)
-        pid.output = pid.p * pid.error + pid.d * pid.derivative;
+        pid.integral += pid.error * pid.i;
+
+        pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
+
+        // PID output
+        pid.output = pid.p * pid.error + pid.derivative + pid.integral;
+
+        pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
 
         pid.prev_error = pid.error;
 
-        shaft_angle += pid.output;
+        phaseVoltage = pid.output;
 
-        setPhaseVoltage(phaseVoltage, shaft_angle * pole_pairs);
+        setPhaseVoltage(phaseVoltage, electricalAngle);
     }
 }
 
@@ -393,6 +418,73 @@ void sendFloats(FloatStruct *data) {
 uint8_t txData[6];
 uint8_t rxData[6];
 uint32_t lastRawAngle = 0;
+
+
+float velocity=0.0f;
+float angle_prev=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
+float angleFull=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
+
+float zero_electric_angle;
+
+uint32_t angle_prev_ts=0; // timestamp of last call to getAngle, used for velocity
+float vel_angle_prev=0.0f; // angle at last call to getVelocity, used for velocity
+uint32_t vel_angle_prev_ts=0; // last velocity calculation timestamp
+int32_t full_rotations=0; // full rotation tracking
+int32_t vel_full_rotations=0; // previous full rotation value for velocity calculation
+
+const int32_t sensor_direction = 1;
+
+
+
+#define _2PI 6.28318530718f
+#define TWO_PI 6.28318530718f  // 2 * π
+#define _1_OVER_2PI 0.15915494309f  // 1 / (2 * PI)
+#define _3PI_2 4.71238898038f
+
+
+// normalizing radian angle to [0,2PI]
+__attribute__((weak)) float _normalizeAngle(float angle){
+	float norm = angle - TWO_PI * ((int)(angle * _1_OVER_2PI));
+	return (norm < 0) ? (norm + TWO_PI) : norm;
+}
+
+
+
+
+void ENC_Update(){
+	//		HAL_SPI_DeInit(&hspi2);
+	//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
+	//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
+	//		HAL_SPI_Init(&hspi2);
+
+	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
+
+	txData[0] = 0b1010 << 4;
+	txData[1] = 0x03;
+
+	HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
+
+	lastRawAngle = 0;
+
+	// Extract bits from rawData1 and rawData2
+	lastRawAngle |= ((uint32_t)(rxData[0 + 2]) << 13);  // Upper 8 bits (ANGLE[20:13])
+	lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
+	lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
+
+	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
+
+    float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
+//	    angle_prev_ts = TIM6->CNT;
+    float d_angle = val - angle_prev;
+    // if overflow happened track it as full rotation
+    if(abs(d_angle) > (0.8f*_2PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
+    angle_prev = val;
+
+    angleFull = (float)full_rotations * _2PI + angle_prev;
+
+	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
+	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
+}
 
 
 
@@ -463,7 +555,15 @@ int main(void)
 	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
 	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)1);
 
-	HAL_TIM_Base_Start_IT(&htim6);
+
+
+
+
+
+
+
+
+
 
 
 	ADC1->CR |= ADC_CR_ADCAL;
@@ -492,8 +592,17 @@ int main(void)
 	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
 
+
+
+	setPhaseVoltage(5.65, _3PI_2);
+	HAL_Delay(2000);
+	ENC_Update();
+	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
+	setPhaseVoltage(0, _3PI_2);
+
 	configNRF(10);
 
+	HAL_TIM_Base_Start_IT(&htim6);
 
 //	while (1){
 //		// Read battery Voltage
@@ -562,7 +671,19 @@ int main(void)
 		accelb = icm42670_read_accel(&imuB);
 		gyrob = icm42670_read_gyro(&imuB);
 
+
+
+
+
 		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
+
+	    if(abs(angleb - angleb_prev) > (0.8f * 360.0f) ) ACC_FullRotations += ( (angleb - angleb_prev) > 0 ) ? -1 : 1;
+
+		angleb_prev = angleb;
+
+		anglebFull = (float)ACC_FullRotations * 360.0f + angleb_prev;
+
+
 
 //		if (NRF_DataReady()) {
 //			NRF_GetData(buffer);
@@ -574,39 +695,29 @@ int main(void)
 
 
 
-		//		HAL_SPI_DeInit(&hspi2);
-		//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
-		//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
-		//		HAL_SPI_Init(&hspi2);
-
-		HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
-
-		txData[0] = 0b1010 << 4;
-		txData[1] = 0x03;
-
-		HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
-
-		lastRawAngle = 0;
-
-		// Extract bits from rawData1 and rawData2
-		lastRawAngle |= ((uint32_t)(rxData[0 + 2]) << 13);  // Upper 8 bits (ANGLE[20:13])
-		lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
-		lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
-
-		HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
 
 
 
 
-		// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
-		// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
+
+		ENC_Update();
+
+
+		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
 
 
 
-		myData.a = angleb;
+		pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
+
+
+
+
+
+
+		myData.a = anglebFull;
 		myData.b = pid.output;
-		myData.c = pid.error;
+		myData.c = pid.error * pid.p;
 		myData.d = pid.target;
 		myData.e = pid.derivative;
 
