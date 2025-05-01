@@ -385,6 +385,18 @@ void sendFloats(FloatStruct *data) {
     HAL_UART_Transmit(&huart2, (uint8_t *)&reversedData, sizeof(FloatStruct), 1000);
 }
 
+
+
+
+
+
+uint8_t txData[6];
+uint8_t rxData[6];
+uint32_t lastRawAngle = 0;
+
+
+
+
 /* USER CODE END 0 */
 
 /**
@@ -552,12 +564,36 @@ int main(void)
 
 		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
 
-		if (NRF_DataReady()) {
-			NRF_GetData(buffer);
+//		if (NRF_DataReady()) {
+//			NRF_GetData(buffer);
+//
+//			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
+//			BAT_VoltageToRGB(BAT.voltage);
+//		}
 
-			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
-			BAT_VoltageToRGB(BAT.voltage);
-		}
+
+
+
+		//		HAL_SPI_DeInit(&hspi2);
+		//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
+		//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
+		//		HAL_SPI_Init(&hspi2);
+
+		HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
+
+		txData[0] = 0b1010 << 4;
+		txData[1] = 0x03;
+
+		HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
+
+		lastRawAngle = 0;
+
+		// Extract bits from rawData1 and rawData2
+		lastRawAngle |= ((uint32_t)(rxData[0 + 2]) << 13);  // Upper 8 bits (ANGLE[20:13])
+		lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
+		lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
+
+		HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
 
 
 

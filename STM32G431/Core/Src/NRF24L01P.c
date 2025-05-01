@@ -18,10 +18,10 @@ uint8_t payload;
 
 uint8_t softSpiTransfer(uint8_t txByte) {
 
-		HAL_SPI_DeInit(&hspi2);
-		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
-		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
-		HAL_SPI_Init(&hspi2);
+//		HAL_SPI_DeInit(&hspi2);
+//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
+//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
+//		HAL_SPI_Init(&hspi2);
 
 		uint8_t rxByte = 0x00;    // Variable to store received byte
 
