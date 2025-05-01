@@ -77,6 +77,8 @@ void Error_Handler(void);
 #define NRF_SS_GPIO_Port GPIOB
 #define STDBY_Pin GPIO_PIN_6
 #define STDBY_GPIO_Port GPIOC
+#define ENC_CSN_Pin GPIO_PIN_15
+#define ENC_CSN_GPIO_Port GPIOA
 #define CHARGE_ENABLE_Pin GPIO_PIN_10
 #define CHARGE_ENABLE_GPIO_Port GPIOC
 #define DRIVER_ENABLE1_Pin GPIO_PIN_3
