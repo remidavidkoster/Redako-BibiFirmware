@@ -58,7 +58,7 @@ float shaft_angle;
 
 
 ICM42670 imuA;
-ICM42670 imuB;
+ICM42670 imu;
 
 
 // NRF buffer
@@ -90,6 +90,7 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 
 #include "math.h"
+#include "MadgwickAHRS.h"
 
 #define TABLE_SIZE 2048
 #define TWO_PI 6.28318530718f  // 2 * π
@@ -289,7 +290,9 @@ typedef struct {
 	sensorXYZFloat gyro;
 	sensorXYZFloat lastGyro;
 
-    float rawAngle, angle, anglePrev, angleFull;
+	float rawAngle, angle, anglePrev, angleFull;
+
+	int32_t turns;
 } IMU_Data;
 
 IMU_Data imu_data;  // Array to store data for two IMUs
@@ -330,8 +333,8 @@ typedef struct {
 
 
 PIDController pid = {
-		.p = 0.001f,
-		.i = 0.00002f,
+		.p = 0.0f,
+		.i = 0.00000f,
 		.d = 0.0f,
 		.alpha = 0.001f,  // Set this based on how much filtering you want
 		.limit = 5.65f,
@@ -504,6 +507,40 @@ void ENC_Update(){
 
 
 
+
+
+
+
+void BAT_Update(){
+	ADC.valueVRefInt = ADC1->DR;
+	ADC.valueBattery = ADC2->DR;
+	BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
+}
+
+
+
+void CHG_RunLogic(){
+
+	// Charge stuff
+	CHG.standby = !HAL_GPIO_ReadPin(STDBY_GPIO_Port, STDBY_Pin);
+	CHG.charging = !HAL_GPIO_ReadPin(CHRG_GPIO_Port, CHRG_Pin);
+	CHG.plugged = HAL_GPIO_ReadPin(VBUS_PRESENT_GPIO_Port, VBUS_PRESENT_Pin);
+	CHG.enabled = BAT.voltage > 2.5f;
+
+	// Charge enable logic
+	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)(CHG.plugged && CHG.enabled));
+}
+
+
+
+
+Madgwick filter;
+
+unsigned long microsPerReading, microsPrevious;
+
+
+
+
 /* USER CODE END 0 */
 
 /**
@@ -545,15 +582,13 @@ int main(void)
 	MX_TIM2_Init();
 	/* USER CODE BEGIN 2 */
 
-	// Keep itself on
-	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
+
+
 
 	// Set VREF to 2.5V
 	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
 
 
-	// Initialize sine lookup table
-	initSinTable();
 
 	// Start microsecond timer, overflows after 71 minutes.
 	HAL_TIM_Base_Start(&htim2);
@@ -566,19 +601,18 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 
+
+
+
+
+
+
+
+
+
+
 	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
 	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
-	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)1);
-
-
-
-
-
-
-
-
-
-
 
 
 	ADC1->CR |= ADC_CR_ADCAL;
@@ -596,21 +630,74 @@ int main(void)
 	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
 
 
+	// Charge power only, no button pressed
+	while (!HAL_GPIO_ReadPin(BUT1_GPIO_Port, BUT1_Pin)){
+
+		// Update global battery Voltage
+		BAT_Update();
+
+		// Display Battery on led
+		BAT_VoltageToRGB(BAT.voltage);
+
+		// Run charge management logic
+		CHG_RunLogic();
+	}
+
+
+
+
+
+	// Keep itself on
+	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
+
+
+	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
+	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
+
+
+
 	//ICM42670 Init
-	if(icm42670_init(&imuB, ICM42670_DEFAULT_ADDRESS, &hi2c2) != HAL_OK){
+	if(icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2) != HAL_OK){
 		failed = 1;
 	}
 
 	// Setup rate & scale
-	icm42670_mclk_on(&imuB);
-	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_1000_DPS, ICM42670_ODR_1600_HZ);
+	icm42670_mclk_on(&imu);
+	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
-	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
+//	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
+//
+//	icm42670_write(&imu, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
 
-	icm42670_write(&imuB, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
+	// Initialize sine lookup table
+	initSinTable();
 
 
+
+
+	/*
+	000: Low pass filter bypassed
+	001: 180 Hz
+	010: 121 Hz
+	011: 73 Hz
+	100: 53 Hz
+	101: 34 Hz
+	110: 25 Hz
+	111: 16 Hz
+	 */
+
+
+//	const uint8_t ACCEL_UI_FILT_BW_16HZ = 0b111;
+//	const uint8_t ACCEL_UI_FILT_BW_34HZ = 0b101;
+//
+//	icm42670_write(&imu, ICM42670_REG_ACCEL_CONFIG1, &ACCEL_UI_FILT_BW_34HZ, 1);
+
+
+
+
+
+	configNRF(10);
 
 
 
@@ -620,9 +707,22 @@ int main(void)
 	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
 	setPhaseVoltage(0, _3PI_2);
 
-	configNRF(10);
 
+
+
+	// Start main motor interrupt
 	HAL_TIM_Base_Start_IT(&htim6);
+
+
+#define SAMPLE_FREQUENCY 1000
+
+
+	// Begin Madwick filter at 1000hz
+	filter.begin(SAMPLE_FREQUENCY);
+
+	// initialize variables to pace updates to correct rate
+	microsPerReading = 1000000 / SAMPLE_FREQUENCY;
+	microsPrevious = TIM2->CNT;
 
 	//	while (1){
 	//		// Read battery Voltage
@@ -662,92 +762,137 @@ int main(void)
 
 
 
-		// Read battery Voltage
-		ADC.valueVRefInt = ADC1->DR;
-		ADC.valueBattery = ADC2->DR;
-		BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
-
-		// Display Battery on led
-		BAT_VoltageToRGB(BAT.voltage);
-
-		// Low battery shut down
-		if (TIM2->CNT > 1000000){
-			if (BAT.voltage < 3.0f) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-		}
-
-		// Charge stuff
-		CHG.standby = HAL_GPIO_ReadPin(STDBY_GPIO_Port, STDBY_Pin);
-		CHG.charging = HAL_GPIO_ReadPin(CHRG_GPIO_Port, CHRG_Pin);
-		CHG.plugged = HAL_GPIO_ReadPin(VBUS_PRESENT_GPIO_Port, VBUS_PRESENT_Pin);
-		CHG.enabled = BAT.voltage > 2.5f;
-
-		// Charge enable logic
-		HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)(CHG.plugged && CHG.enabled));
-
-		// Button shut down
-		if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-
-		// Read accelerometer and gyro data for IMU A (22.35mm offset below point of rotation. X+ is down. Y+ is to the right.)
 
 
-		// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
-		imu_data.accel = icm42670_read_accel(&imuB);
-		imu_data.gyro = icm42670_read_gyro(&imuB);
+		if (TIM2->CNT - microsPrevious >= microsPerReading) {
 
-		imu_data.rawAngle = atan2f(imu_data.accel.y, -imu_data.accel.x) * 180.0f / (float)M_PI;
+			// Update global battery Voltage
+			BAT_Update();
+
+			// Display Battery on led
+			BAT_VoltageToRGB(BAT.voltage);
 
 
 
-		uint32_t timestamp = TIM2->CNT;
-		float dt = (timestamp - lastTimestamp) / 1000000.0f;
-		lastTimestamp = timestamp;
+			// Run charge management logic
+			CHG_RunLogic();
 
 
-		// Constants
+			// Low battery shut down
+			if (TIM2->CNT > 1000000){
+				if (BAT.voltage < 3.0f) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+			}
+
+			// Button shut down
+			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+
+
+
+
+			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
+			imu_data.accel = icm42670_read_accel(&imu);
+			imu_data.gyro = icm42670_read_gyro(&imu);
+
+			imu_data.rawAngle = atan2f(imu_data.accel.y, -imu_data.accel.x) * 180.0f / (float)M_PI;
+
+
+
+			uint32_t timestamp = TIM2->CNT;
+			float dt = (timestamp - lastTimestamp) / 1000000.0f;
+			lastTimestamp = timestamp;
+
+
+			// Constants
 #define RADIUS_B  0.0067f   // 6.7 mm for IMU B offset (in meters)
 #define G_SI      9.80665f  // Standard gravity in m/s^2
 #define DEG2RAD  ((float)(M_PI / 180.0f))
 #define G2MS2    9.80665f
 
-		// IMU B (6.7mm offset)
-		float omegaB = imu_data.gyro.z * DEG2RAD;  // Current angular velocity (rad/s) for IMU B
-		float omegaB_prev = imu_data.lastGyro.z * DEG2RAD;  // Previous angular velocity for IMU B
+			// IMU B (6.7mm offset)
+			float omegaB = imu_data.gyro.z * DEG2RAD;  // Current angular velocity (rad/s) for IMU B
+			float omegaB_prev = imu_data.lastGyro.z * DEG2RAD;  // Previous angular velocity for IMU B
 
-		// Compute angular acceleration for IMU B: alpha = (omega_current - omega_previous) / dt
-		float alphaB = (omegaB - omegaB_prev) / dt;
+			// Compute angular acceleration for IMU B: alpha = (omega_current - omega_previous) / dt
+			float alphaB = (omegaB - omegaB_prev) / dt;
 
-		// Compute centripetal acceleration for IMU B: a_centripetal = r * omega^2
-		float a_centripetal_B = RADIUS_B * omegaB * omegaB;   // toward center (X+)
+			// Compute centripetal acceleration for IMU B: a_centripetal = r * omega^2
+			float a_centripetal_B = RADIUS_B * omegaB * omegaB;   // toward center (X+)
 
-		// Compute tangential acceleration for IMU B: a_tangential = r * alpha
-		float a_tangential_B  = -RADIUS_B * alphaB;           // Y-, for +α
+			// Compute tangential acceleration for IMU B: a_tangential = r * alpha
+			float a_tangential_B  = -RADIUS_B * alphaB;           // Y-, for +α
 
-		// Compensate accelerometer data for IMU B (correct for both radial and tangential acceleration)
-		float accX_corr_B = imu_data.accel.x * G_SI - a_centripetal_B;
-		float accY_corr_B = imu_data.accel.y * G_SI - a_tangential_B;
+			// Compensate accelerometer data for IMU B (correct for both radial and tangential acceleration)
+			float accX_corr_B = imu_data.accel.x * G_SI - a_centripetal_B;
+			float accY_corr_B = imu_data.accel.y * G_SI - a_tangential_B;
 
-		// Compute the gravity angle for IMU B
-		imu_data.angle = atan2f(accY_corr_B, -accX_corr_B) * 180.0f / (float)M_PI;
+			// Compute the gravity angle for IMU B
+			imu_data.angle = atan2f(accY_corr_B, -accX_corr_B) * 180.0f / (float)M_PI;
 
-		// Save current gyro values for the next iteration
-		imu_data.lastGyro.z = imu_data.gyro.z;
-		imu_data.lastGyro.z = imu_data.gyro.z;
-
-
+			// Save current gyro values for the next iteration
+			imu_data.lastGyro.z = imu_data.gyro.z;
+			imu_data.lastGyro.z = imu_data.gyro.z;
 
 
-		float delta_angleb = imu_data.angle - imu_data.anglePrev;
-		if (delta_angleb > 180.0f) delta_angleb -= 360.0f;
-		else if (delta_angleb < -180.0f) delta_angleb += 360.0f;
-		imu_data.angleFull += delta_angleb;
-		imu_data.anglePrev = imu_data.angle;
 
-		//		if (NRF_DataReady()) {
+			// update the filter, which computes orientation
+			filter.updateIMU(imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z, imu_data.accel.x, imu_data.accel.y, imu_data.accel.z);
+
+			float roll = filter.getRoll();
+			float pitch = filter.getPitch();
+			float heading = filter.getYaw();
+
+			float madwickAngle = (roll < 0) ? pitch - 90 : 90 - pitch;
+			static float madwickAnglePrev;
+			static float madwickAngleFull;
+			static int madwickTurns;
+
+
+
+
+			// Assuming imu_data.angle is in [0, 360)
+			float current_angleMad = madwickAngle;
+			float previous_angleMad = madwickAnglePrev;
+
+			float delta_angleMad = current_angleMad - previous_angleMad;
+
+			// Detect wrap-around and update turn counter
+			if (delta_angleMad > 180.0f) {
+				madwickTurns--; // Rotated backwards across 0°
+			} else if (delta_angleMad < -180.0f) {
+				madwickTurns++; // Rotated forward across 360°
+			}
+
+			madwickAnglePrev = current_angleMad;
+
+			// Compute total angle
+			madwickAngleFull = current_angleMad + 360.0f * madwickTurns;
+
+
+
+			// Assuming imu_data.angle is in [0, 360)
+			float current_angle = imu_data.angle;
+			float previous_angle = imu_data.anglePrev;
+
+			float delta_angle = current_angle - previous_angle;
+
+			// Detect wrap-around and update turn counter
+			if (delta_angle > 180.0f) {
+				imu_data.turns--; // Rotated backwards across 0°
+			} else if (delta_angle < -180.0f) {
+				imu_data.turns++; // Rotated forward across 360°
+			}
+
+			imu_data.anglePrev = current_angle;
+
+			// Compute total angle
+			imu_data.angleFull = current_angle + 360.0f * imu_data.turns;
+
+			//		if (NRF_DataReady()) {
 			//			NRF_GetData(buffer);
-		//
-		//			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
-		//			BAT_VoltageToRGB(BAT.voltage);
-		//		}
+			//
+			//			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
+			//			BAT_VoltageToRGB(BAT.voltage);
+			//		}
 
 
 
@@ -757,38 +902,42 @@ int main(void)
 
 
 
-		ENC_Update();
+			ENC_Update();
 
 
-		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
-
-
-
-
-		pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
+			electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
 
 
 
-
-
-		myData.a = imu_data.angleFull;
-		myData.b = pid.output;
-		myData.c = pid.error * pid.p;
-		myData.d = pid.target;
-		myData.e = pid.derivative;
+			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
 
-		sendFloats(&myData);
 
-		//		NRF_Send(buffer);
-		//		while (NRF_IsSending());
-		//
-		//		RGB_Set(0, 0, 0);
-		//		HAL_Delay(100);
-		//		BAT_VoltageToRGB(BAT.voltage);
-		//		HAL_Delay(400);
+
+
+
+			myData.a = imu_data.angleFull;
+			myData.b = roll;
+			myData.c = madwickAngleFull;
+			myData.d = heading;
+			myData.e = 0;
+
+
+
+			sendFloats(&myData);
+
+			//		NRF_Send(buffer);
+			//		while (NRF_IsSending());
+			//
+			//		RGB_Set(0, 0, 0);
+			//		HAL_Delay(100);
+			//		BAT_VoltageToRGB(BAT.voltage);
+			//		HAL_Delay(400);
+
+			microsPrevious = microsPrevious + microsPerReading;
+		}
 
 
 		/* USER CODE END WHILE */

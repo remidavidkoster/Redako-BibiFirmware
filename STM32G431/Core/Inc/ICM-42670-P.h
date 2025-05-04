@@ -75,6 +75,7 @@ extern "C" {
 /* Other registers */
 #define ICM42670_REG_INT_SOURCE1            (0x2CU)
 #define ICM42670_REG_GYRO_CONFIG1           (0x23U)
+#define ICM42670_REG_ACCEL_CONFIG1          (0x24U)
 
 /* Bank selection registers */
 #define ICM42670_REG_BLK_SEL_R              (0x7CU)
