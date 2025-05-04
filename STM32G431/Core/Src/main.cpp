@@ -1,22 +1,3 @@
-/* USER CODE BEGIN Header */
-/**
- ******************************************************************************
- * @file           : main.c
- * @brief          : Main program body
- ******************************************************************************
- * @attention
- *
- * Copyright (c) 2025 STMicroelectronics.
- * All rights reserved.
- *
- * This software is licensed under terms that can be found in the LICENSE file
- * in the root directory of this software component.
- * If no LICENSE file comes with this software, it is provided AS-IS.
- *
- ******************************************************************************
- */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
 #include "i2c.h"
@@ -25,41 +6,26 @@
 #include "gpio.h"
 #include "spi.h"
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
 #include "ICM-42670-P.h"
 #include "NRF24L01P.h"
+#include "math.h"
+#include "MadgwickAHRS.h"
+#include <string.h>
 
-/* USER CODE END Includes */
+void SystemClock_Config(void);
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define LIMIT(low,x,high) ((x)<(low)?(low):((x)>(high)?(high):(x)))
+#define ABS(x) ((x) < 0 ? -(x) : (x))
 
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-
-/* USER CODE BEGIN PV */
-
-
-int POLE_PAIRS = 7;
-float shaft_angle;
+#define POLE_PAIRS 7
 
 
 
-ICM42670 imuA;
-ICM42670 imu;
 
+
+/// Radio Stuff
 
 // NRF buffer
 #define PAYLOADSIZE 12
@@ -78,22 +44,15 @@ void configNRF(uint8_t chan) {
 
 
 
-/* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);
-/* USER CODE BEGIN PFP */
 
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-#include "math.h"
-#include "MadgwickAHRS.h"
+/// Sine math stuff
 
 #define TABLE_SIZE 2048
 #define TWO_PI 6.28318530718f  // 2 * π
+#define _SQRT3_2 0.86602540378f
+#define _1_OVER_2PI 0.15915494309f  // 1 / (2 * PI)
+#define _3PI_2 4.71238898038f
 
 
 float sinTable[TABLE_SIZE];
@@ -103,9 +62,6 @@ void initSinTable() {
 		sinTable[i] = sinf((TWO_PI * i) / TABLE_SIZE);
 	}
 }
-
-
-
 
 // Fast sine lookup. Divide gets precomputed here
 inline float fastSin(float x) {
@@ -118,40 +74,45 @@ inline float fastCos(float x) {
 	return fastSin(x + (TWO_PI / 4));  // cos(x) = sin(x + π/2)
 }
 
-
-void _sincos(float a, float* s, float* c){
+// Single SIN/COS function for FOC
+inline void _sincos(float a, float* s, float* c){
 	*s = fastSin(a);
 	*c = fastCos(a);
 }
 
+// normalizing radian angle to [0,2PI]
+inline float _normalizeAngle(float angle){
+	float norm = angle - TWO_PI * ((int)(angle * _1_OVER_2PI));
+	return (norm < 0) ? (norm + TWO_PI) : norm;
+}
 
-float Ualpha, Ubeta; //!< Phase voltages U alpha and U beta used for inverse Park and Clarke transform
-float Ua, Ub, Uc;//!< Current phase voltages Ua,Ub and Uc set to motor
 
-#define _SQRT3_2 0.86602540378f
+
+
+
+/// PWM / Motor Stuff
 
 #define SUPPLY_VOLTAGE 11.3f
 
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define LIMIT(low,x,high) ((x)<(low)?(low):((x)>(high)?(high):(x)))
-
 #define PWM_MAX ((int)8499)
 
-#define _1_DIV_SUPPLY_VOLTAGExPWM_MAX (1/11.3f*PWM_MAX)
+#define _1_DIV_SUPPLY_VOLTAGExPWM_MAX (1/SUPPLY_VOLTAGE*PWM_MAX)
 
-// Empirically determined PWM limits - strange behavior when exceeding these in up-down counting HRTIM1. Might not be relevant for normal timer but untested still.
+// Arbitrary PWM limits for now
 int lowerPWMLimit = 10;
 int upperPWMLimit = 8489;
 
 int motorNumber = 0;
 
+// Default open loop phase voltage
+float phaseVoltage = 5;
 
+// Current phase voltages Ua,Ub and Uc set to motor [V]
+float Ua, Ub, Uc;
 
+// Main FOC Function
 void setPhaseVoltage(float Uq, float angle_el) {
-
-	float center;
-	float _ca,_sa;
+	float Ualpha, Ubeta, center, _ca,_sa;
 
 	// Sinusoidal PWM modulation
 	// Inverse Park + Clarke transformation
@@ -168,24 +129,20 @@ void setPhaseVoltage(float Uq, float angle_el) {
 
 	center = SUPPLY_VOLTAGE * 0.5f;
 
-	if (0){//foc_modulation == 1){
-		// discussed here: https://community.simplefoc.com/t/embedded-world-2023-stm32-cordic-co-processor/3107/165?u=candas1
-		// a bit more info here: https://microchipdeveloper.com/mct5001:which-zsm-is-best
+	if (1){//foc_modulation == 1){
 		// Midpoint Clamp
 		float Umin = min(Ua, min(Ub, Uc));
 		float Umax = max(Ua, max(Ub, Uc));
 		center -= (Umax+Umin) * 0.5f;
 	}
 
-
+	// Add center voltages [V]
 	Ua += center;
 	Ub += center;
 	Uc += center;
 
 
-
-	// calculate duty cycle and PWM value in one
-	// limited in [0,1]
+	// calculate duty cycle and PWM value in one go. limited in [0,1]
 	uint16_t dc_a = Ua * _1_DIV_SUPPLY_VOLTAGExPWM_MAX;
 	uint16_t dc_b = Ub * _1_DIV_SUPPLY_VOLTAGExPWM_MAX;
 	uint16_t dc_c = Uc * _1_DIV_SUPPLY_VOLTAGExPWM_MAX;
@@ -208,6 +165,10 @@ void setPhaseVoltage(float Uq, float angle_el) {
 }
 
 
+
+
+
+/// RGB LED Stuff
 
 #define RGB_PWM_MAX 8499
 
@@ -246,8 +207,11 @@ void BAT_VoltageToRGB(float voltage) {
 	RGB_Set(r, g, b);
 }
 
-float phaseVoltage = 0;
 
+
+
+
+/// ADC Stuff
 
 struct ADC {
 	uint16_t valueBattery;
@@ -260,6 +224,9 @@ struct ADC {
 
 
 
+
+/// Battery Stuff
+
 struct BAT {
 	float voltage;
 } BAT;
@@ -271,20 +238,18 @@ struct CHG {
 	uint8_t enabled;
 } CHG;
 
+void BAT_Update(){
+	ADC.valueVRefInt = ADC1->DR;
+	ADC.valueBattery = ADC2->DR;
+	BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
+}
 
 
 
 
 
+/// Accelerometer stuff
 
-
-
-
-
-
-
-
-// Struct to hold accelerometer and gyro data, and angles
 typedef struct {
 	sensorXYZFloat accel;
 	sensorXYZFloat gyro;
@@ -298,19 +263,15 @@ typedef struct {
 
 IMU_Data imu_data;  // Array to store data for two IMUs
 
-uint32_t timestamp;
-uint32_t lastTimestamp;
-
-
-
-
-
-
-
-
+ICM42670 imu;
 
 uint8_t failed;
 
+
+
+
+
+/// PID Stuff
 
 typedef struct {
 	float p;
@@ -334,58 +295,32 @@ typedef struct {
 
 
 PIDController pid = {
-		.p = 0.02f,
-		.i = 0.00005f,
-		.d = 400.0f,
+		.p = 2.99999989e-008f,
+		.i = 0.0f,
+		.d = 9.99999975e-005f,
 		.alpha = 0.001f,  // Set this based on how much filtering you want
-		.limit = 5.65f,
+		.limit = 0.005f,
 		.target = 0.0f
 };
 
 float speed;
-
-#define ABS(x) ((x) < 0 ? -(x) : (x))
-
 float electricalAngle;
+
+
+
+
+
+/// Madwick Stuff
+
+Madgwick filter;
 
 volatile float madwickAngleFull;
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-	if (htim->Instance == TIM6) {
-
-		pid.error = madwickAngleFull - pid.target;
-
-		if (pid.target != pid.lastTarget){
-			pid.prev_error = pid.error;
-			pid.lastTarget = pid.target;
-		}
-
-
-		// Derivative with low-pass filter
-		pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
-
-		pid.integral += pid.error * pid.i;
-
-		pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
-
-		// PID output
-		pid.output = pid.p * pid.error + pid.derivative + pid.integral;
-
-		pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
-
-		pid.prev_error = pid.error;
-
-		phaseVoltage = pid.output;
-
-		setPhaseVoltage(phaseVoltage, electricalAngle);
-	}
-}
 
 
 
 
-#include <string.h>  // Also works fine for embedded C/C++
-
+/// Float send debug stuff
 
 #pragma pack(push, 1)
 typedef struct {
@@ -414,9 +349,6 @@ float reverseFloatBytes(float input) {
 	return output;
 }
 
-
-
-
 void sendFloats(FloatStruct *data) {
 	FloatStruct reversedData;
 
@@ -434,13 +366,12 @@ void sendFloats(FloatStruct *data) {
 
 
 
+/// Encoder stuff
 
 uint8_t txData[6];
 uint8_t rxData[6];
 uint32_t lastRawAngle = 0;
 
-
-float velocity=0.0f;
 float angle_prev=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
 float angleFull=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
 
@@ -453,22 +384,6 @@ int32_t full_rotations=0; // full rotation tracking
 int32_t vel_full_rotations=0; // previous full rotation value for velocity calculation
 
 const int32_t sensor_direction = 1;
-
-
-
-#define _2PI 6.28318530718f
-#define TWO_PI 6.28318530718f  // 2 * π
-#define _1_OVER_2PI 0.15915494309f  // 1 / (2 * PI)
-#define _3PI_2 4.71238898038f
-
-
-// normalizing radian angle to [0,2PI]
-__attribute__((weak)) float _normalizeAngle(float angle){
-	float norm = angle - TWO_PI * ((int)(angle * _1_OVER_2PI));
-	return (norm < 0) ? (norm + TWO_PI) : norm;
-}
-
-
 
 
 void ENC_Update(){
@@ -497,10 +412,10 @@ void ENC_Update(){
 	//	    angle_prev_ts = TIM6->CNT;
 	float d_angle = val - angle_prev;
 	// if overflow happened track it as full rotation
-	if(abs(d_angle) > (0.8f*_2PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
+	if(abs(d_angle) > (0.8f*TWO_PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
 	angle_prev = val;
 
-	angleFull = (float)full_rotations * _2PI + angle_prev;
+	angleFull = (float)full_rotations * TWO_PI + angle_prev;
 
 	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
 	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
@@ -513,11 +428,7 @@ void ENC_Update(){
 
 
 
-void BAT_Update(){
-	ADC.valueVRefInt = ADC1->DR;
-	ADC.valueBattery = ADC2->DR;
-	BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
-}
+
 
 
 
@@ -536,12 +447,12 @@ void CHG_RunLogic(){
 
 
 
-Madgwick filter;
-
-unsigned long microsPerReading, microsPrevious;
 
 
 
+
+
+/// Gyro calib / init stuff
 
 float gyro_offsets[3] = {0.0, 0.0, 0.0}; // To store the gyro offsets
 
@@ -571,6 +482,7 @@ float calculate_standard_deviation(float *data, int num_samples) {
 float accel_x_stddev;
 float accel_y_stddev;
 float accel_z_stddev;
+
 
 void waitForStableGetGyroOffsets(){
 	while (1) {
@@ -632,33 +544,68 @@ void waitForStableGetGyroOffsets(){
 }
 
 
-/* USER CODE END 0 */
 
-/**
- * @brief  The application entry point.
- * @retval int
- */
-int main(void)
-{
-	/* USER CODE BEGIN 1 */
 
-	/* USER CODE END 1 */
 
-	/* MCU Configuration--------------------------------------------------------*/
+/// Main 10kHz pid loop
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	if (htim->Instance == TIM6) {
+
+		pid.error = madwickAngleFull - pid.target;
+
+		if (pid.target != pid.lastTarget){
+			pid.prev_error = pid.error;
+			pid.lastTarget = pid.target;
+		}
+
+
+		// Derivative with low-pass filter
+		pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
+
+		pid.integral += pid.error * pid.i;
+
+		pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
+
+		// PID output
+		pid.output = pid.p * pid.error + pid.derivative + pid.integral;
+
+		pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
+
+		pid.prev_error = pid.error;
+
+		//phaseVoltage = pid.output;
+
+		speed += pid.output;
+
+		speed = LIMIT(-pid.limit, speed, pid.limit);
+
+		electricalAngle += speed;
+
+		setPhaseVoltage(phaseVoltage, electricalAngle);
+	}
+}
+
+
+
+
+
+/// Timing stuff
+
+unsigned long microsPerReading, microsPrevious, microsUsed;
+
+
+
+
+
+// Main loop
+int main(void) {
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
 
-	/* USER CODE BEGIN Init */
-
-	/* USER CODE END Init */
-
 	/* Configure the system clock */
 	SystemClock_Config();
-
-	/* USER CODE BEGIN SysInit */
-
-	/* USER CODE END SysInit */
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
@@ -671,7 +618,6 @@ int main(void)
 	MX_TIM3_Init();
 	MX_USART2_UART_Init();
 	MX_TIM2_Init();
-	/* USER CODE BEGIN 2 */
 
 
 
@@ -950,15 +896,15 @@ int main(void)
 
 
 
-			ENC_Update();
+			//ENC_Update();
 
 
-			electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
+			//electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
 
 
 
-			pid.target = TIM2->CNT / 3000000 & 1 ? 90 : -90;
+//			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
 
@@ -983,6 +929,8 @@ int main(void)
 			//		HAL_Delay(100);
 			//		BAT_VoltageToRGB(BAT.voltage);
 			//		HAL_Delay(400);
+
+			microsUsed = TIM2->CNT - microsPrevious;
 
 			microsPrevious = microsPrevious + microsPerReading;
 		}
