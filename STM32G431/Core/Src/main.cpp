@@ -570,7 +570,7 @@ int main(void)
 	// Setup rate & scale
 	icm42670_mclk_on(&imuB);
 	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_1000_DPS, ICM42670_ODR_1600_HZ);
 
 
 	//ICM42670 Init
@@ -581,7 +581,7 @@ int main(void)
 	// Setup rate & scale
 	icm42670_mclk_on(&imuA);
 	icm42670_start_accel(&imuA, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imuA, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imuA, ICM42670_GYRO_FS_1000_DPS, ICM42670_ODR_1600_HZ);
 
 
 
@@ -785,11 +785,11 @@ int main(void)
 
 
 
-		myData.a = imu_data[0].angleFull;
-		myData.b = imu_data[1].angleFull;
-		myData.c = imu_data[0].rawAngle;
-		myData.d = imu_data[1].rawAngle;
-		myData.e = accY_corr_A;
+		myData.a = imu_data[0].gyro.z;
+		myData.b = imu_data[1].gyro.z;
+		myData.c = 0;
+		myData.d = 0;
+		myData.e = 0;
 
 
 
