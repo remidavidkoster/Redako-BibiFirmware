@@ -278,49 +278,64 @@ struct CHG {
 
 
 
-sensorXYZ accel;
-sensorXYZ gyro;
-sensorXYZ accelb;
-sensorXYZ gyrob;
 
-int32_t ACC_FullRotations = 0;
 
-volatile float angleb;
-volatile float angleb_prev;
-volatile float anglebFull;
+
+
+
+// Struct to hold accelerometer and gyro data, and angles
+typedef struct {
+	sensorXYZFloat accel;
+	sensorXYZFloat gyro;
+	sensorXYZFloat lastGyro;
+
+    float rawAngle, angle, anglePrev, angleFull;
+} IMU_Data;
+
+IMU_Data imu_data;  // Array to store data for two IMUs
+
+uint32_t timestamp;
+uint32_t lastTimestamp;
+
+
+
+
+
+
+
 
 
 uint8_t failed;
 
 
 typedef struct {
-    float p;
-    float i;
-    float d;
+	float p;
+	float i;
+	float d;
 
-    float error;
-    float prev_error;
-    float derivative;
-    float integral;
-    float output;
+	float error;
+	float prev_error;
+	float derivative;
+	float integral;
+	float output;
 
-    float dt;
-    float alpha;  // Low-pass filter factor for the derivative term
+	float dt;
+	float alpha;  // Low-pass filter factor for the derivative term
 
-    float limit;
+	float limit;
 
-    float target;
-    float lastTarget;
+	float target;
+	float lastTarget;
 } PIDController;
 
 
 PIDController pid = {
-	.p = 0.001f,
-	.i = 0.00002f,
-    .d = 0.0f,
-    .alpha = 0.001f,  // Set this based on how much filtering you want
-	.limit = 5.65f,
-    .target = 0.0f
+		.p = 0.001f,
+		.i = 0.00002f,
+		.d = 0.0f,
+		.alpha = 0.001f,  // Set this based on how much filtering you want
+		.limit = 5.65f,
+		.target = 0.0f
 };
 
 float speed;
@@ -331,34 +346,34 @@ float electricalAngle;
 
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-    if (htim->Instance == TIM6) {
+	if (htim->Instance == TIM6) {
 
-        pid.error = anglebFull - pid.target;
+		pid.error = imu_data.angleFull - pid.target;
 
-    	if (pid.target != pid.lastTarget){
-    		pid.prev_error = pid.error;
-        	pid.lastTarget = pid.target;
-    	}
+		if (pid.target != pid.lastTarget){
+			pid.prev_error = pid.error;
+			pid.lastTarget = pid.target;
+		}
 
 
-        // Derivative with low-pass filter
-        pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
+		// Derivative with low-pass filter
+		pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
 
-        pid.integral += pid.error * pid.i;
+		pid.integral += pid.error * pid.i;
 
-        pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
+		pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
 
-        // PID output
-        pid.output = pid.p * pid.error + pid.derivative + pid.integral;
+		// PID output
+		pid.output = pid.p * pid.error + pid.derivative + pid.integral;
 
-        pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
+		pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
 
-        pid.prev_error = pid.error;
+		pid.prev_error = pid.error;
 
-        phaseVoltage = pid.output;
+		phaseVoltage = pid.output;
 
-        setPhaseVoltage(phaseVoltage, electricalAngle);
-    }
+		setPhaseVoltage(phaseVoltage, electricalAngle);
+	}
 }
 
 
@@ -369,45 +384,45 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
 #pragma pack(push, 1)
 typedef struct {
-    float a;
-    float b;
-    float c;
-    float d;
-    float e;
-    float f;
+	float a;
+	float b;
+	float c;
+	float d;
+	float e;
+	float f;
 } FloatStruct;
 #pragma pack(pop)
 
 FloatStruct myData;
 
 float reverseFloatBytes(float input) {
-    uint8_t *bytes = (uint8_t *)&input;
-    uint8_t reversed[4];
+	uint8_t *bytes = (uint8_t *)&input;
+	uint8_t reversed[4];
 
-    reversed[0] = bytes[3];
-    reversed[1] = bytes[2];
-    reversed[2] = bytes[1];
-    reversed[3] = bytes[0];
+	reversed[0] = bytes[3];
+	reversed[1] = bytes[2];
+	reversed[2] = bytes[1];
+	reversed[3] = bytes[0];
 
-    float output;
-    memcpy(&output, reversed, sizeof(float));
-    return output;
+	float output;
+	memcpy(&output, reversed, sizeof(float));
+	return output;
 }
 
 
 
 
 void sendFloats(FloatStruct *data) {
-    FloatStruct reversedData;
+	FloatStruct reversedData;
 
-    reversedData.a = reverseFloatBytes(data->a);
-    reversedData.b = reverseFloatBytes(data->b);
-    reversedData.c = reverseFloatBytes(data->c);
-    reversedData.d = reverseFloatBytes(data->d);
-    reversedData.e = reverseFloatBytes(data->e);
-    reversedData.f = reverseFloatBytes(data->f);
+	reversedData.a = reverseFloatBytes(data->a);
+	reversedData.b = reverseFloatBytes(data->b);
+	reversedData.c = reverseFloatBytes(data->c);
+	reversedData.d = reverseFloatBytes(data->d);
+	reversedData.e = reverseFloatBytes(data->e);
+	reversedData.f = reverseFloatBytes(data->f);
 
-    HAL_UART_Transmit(&huart2, (uint8_t *)&reversedData, sizeof(FloatStruct), 1000);
+	HAL_UART_Transmit(&huart2, (uint8_t *)&reversedData, sizeof(FloatStruct), 1000);
 }
 
 
@@ -473,14 +488,14 @@ void ENC_Update(){
 
 	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
 
-    float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
-//	    angle_prev_ts = TIM6->CNT;
-    float d_angle = val - angle_prev;
-    // if overflow happened track it as full rotation
-    if(abs(d_angle) > (0.8f*_2PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
-    angle_prev = val;
+	float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
+	//	    angle_prev_ts = TIM6->CNT;
+	float d_angle = val - angle_prev;
+	// if overflow happened track it as full rotation
+	if(abs(d_angle) > (0.8f*_2PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
+	angle_prev = val;
 
-    angleFull = (float)full_rotations * _2PI + angle_prev;
+	angleFull = (float)full_rotations * _2PI + angle_prev;
 
 	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
 	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
@@ -589,7 +604,12 @@ int main(void)
 	// Setup rate & scale
 	icm42670_mclk_on(&imuB);
 	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_1000_DPS, ICM42670_ODR_1600_HZ);
+
+	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
+
+	icm42670_write(&imuB, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
+
 
 
 
@@ -604,32 +624,32 @@ int main(void)
 
 	HAL_TIM_Base_Start_IT(&htim6);
 
-//	while (1){
-//		// Read battery Voltage
-//		ADC.valueVRefInt = ADC1->DR;
-//		ADC.valueBattery = ADC2->DR;
-//		BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
-//
-//
-//
-//		accelb = icm42670_read_accel(&imuB);
-//		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
-//
-//
-//		angleb = LIMIT(-45, angleb, 45);
-//
-//		buffer[0] = (angleb + 45.0f) * 255.0f / 90.0f;
-//
-//		NRF_Send(buffer);
-//		while (NRF_IsSending());
-//
-//
-//		BAT_VoltageToRGB(BAT.voltage);
-//		HAL_Delay(5);
-//		RGB_Set(0, 0, 0);
-//		HAL_Delay(45);
-//
-//	}
+	//	while (1){
+	//		// Read battery Voltage
+	//		ADC.valueVRefInt = ADC1->DR;
+	//		ADC.valueBattery = ADC2->DR;
+	//		BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
+	//
+	//
+	//
+	//		accelb = icm42670_read_accel(&imuB);
+	//		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
+	//
+	//
+	//		angleb = LIMIT(-45, angleb, 45);
+	//
+	//		buffer[0] = (angleb + 45.0f) * 255.0f / 90.0f;
+	//
+	//		NRF_Send(buffer);
+	//		while (NRF_IsSending());
+	//
+	//
+	//		BAT_VoltageToRGB(BAT.voltage);
+	//		HAL_Delay(5);
+	//		RGB_Set(0, 0, 0);
+	//		HAL_Delay(45);
+	//
+	//	}
 
 
 
@@ -667,30 +687,67 @@ int main(void)
 		// Button shut down
 		if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 
-		// Accelerometer stuff
-		accelb = icm42670_read_accel(&imuB);
-		gyrob = icm42670_read_gyro(&imuB);
+		// Read accelerometer and gyro data for IMU A (22.35mm offset below point of rotation. X+ is down. Y+ is to the right.)
+
+
+		// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
+		imu_data.accel = icm42670_read_accel(&imuB);
+		imu_data.gyro = icm42670_read_gyro(&imuB);
+
+		imu_data.rawAngle = atan2f(imu_data.accel.y, -imu_data.accel.x) * 180.0f / (float)M_PI;
+
+
+
+		uint32_t timestamp = TIM2->CNT;
+		float dt = (timestamp - lastTimestamp) / 1000000.0f;
+		lastTimestamp = timestamp;
+
+
+		// Constants
+#define RADIUS_B  0.0067f   // 6.7 mm for IMU B offset (in meters)
+#define G_SI      9.80665f  // Standard gravity in m/s^2
+#define DEG2RAD  ((float)(M_PI / 180.0f))
+#define G2MS2    9.80665f
+
+		// IMU B (6.7mm offset)
+		float omegaB = imu_data.gyro.z * DEG2RAD;  // Current angular velocity (rad/s) for IMU B
+		float omegaB_prev = imu_data.lastGyro.z * DEG2RAD;  // Previous angular velocity for IMU B
+
+		// Compute angular acceleration for IMU B: alpha = (omega_current - omega_previous) / dt
+		float alphaB = (omegaB - omegaB_prev) / dt;
+
+		// Compute centripetal acceleration for IMU B: a_centripetal = r * omega^2
+		float a_centripetal_B = RADIUS_B * omegaB * omegaB;   // toward center (X+)
+
+		// Compute tangential acceleration for IMU B: a_tangential = r * alpha
+		float a_tangential_B  = -RADIUS_B * alphaB;           // Y-, for +α
+
+		// Compensate accelerometer data for IMU B (correct for both radial and tangential acceleration)
+		float accX_corr_B = imu_data.accel.x * G_SI - a_centripetal_B;
+		float accY_corr_B = imu_data.accel.y * G_SI - a_tangential_B;
+
+		// Compute the gravity angle for IMU B
+		imu_data.angle = atan2f(accY_corr_B, -accX_corr_B) * 180.0f / (float)M_PI;
+
+		// Save current gyro values for the next iteration
+		imu_data.lastGyro.z = imu_data.gyro.z;
+		imu_data.lastGyro.z = imu_data.gyro.z;
 
 
 
 
+		float delta_angleb = imu_data.angle - imu_data.anglePrev;
+		if (delta_angleb > 180.0f) delta_angleb -= 360.0f;
+		else if (delta_angleb < -180.0f) delta_angleb += 360.0f;
+		imu_data.angleFull += delta_angleb;
+		imu_data.anglePrev = imu_data.angle;
 
-		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
-
-	    if(abs(angleb - angleb_prev) > (0.8f * 360.0f) ) ACC_FullRotations += ( (angleb - angleb_prev) > 0 ) ? -1 : 1;
-
-		angleb_prev = angleb;
-
-		anglebFull = (float)ACC_FullRotations * 360.0f + angleb_prev;
-
-
-
-//		if (NRF_DataReady()) {
-//			NRF_GetData(buffer);
-//
-//			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
-//			BAT_VoltageToRGB(BAT.voltage);
-//		}
+		//		if (NRF_DataReady()) {
+			//			NRF_GetData(buffer);
+		//
+		//			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
+		//			BAT_VoltageToRGB(BAT.voltage);
+		//		}
 
 
 
@@ -715,7 +772,7 @@ int main(void)
 
 
 
-		myData.a = anglebFull;
+		myData.a = imu_data.angleFull;
 		myData.b = pid.output;
 		myData.c = pid.error * pid.p;
 		myData.d = pid.target;
@@ -723,15 +780,15 @@ int main(void)
 
 
 
-	    sendFloats(&myData);
+		sendFloats(&myData);
 
-//		NRF_Send(buffer);
-//		while (NRF_IsSending());
-//
-//		RGB_Set(0, 0, 0);
-//		HAL_Delay(100);
-//		BAT_VoltageToRGB(BAT.voltage);
-//		HAL_Delay(400);
+		//		NRF_Send(buffer);
+		//		while (NRF_IsSending());
+		//
+		//		RGB_Set(0, 0, 0);
+		//		HAL_Delay(100);
+		//		BAT_VoltageToRGB(BAT.voltage);
+		//		HAL_Delay(400);
 
 
 		/* USER CODE END WHILE */

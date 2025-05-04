@@ -190,6 +190,17 @@ typedef struct
   int16_t z;  /* Z-axis data */
 } sensorXYZ;
 
+
+typedef struct
+{
+  float x;  /* X-axis data */
+  float y;  /* Y-axis data */
+  float z;  /* Z-axis data */
+} sensorXYZFloat;
+
+extern int16_t zDebug;
+
+
 /**
   * @brief ICM42670 device structure
   */
@@ -225,8 +236,8 @@ HAL_StatusTypeDef icm42670_start_accel(ICM42670 *sensor, uint8_t scale, uint8_t 
 HAL_StatusTypeDef icm42670_start_gyro(ICM42670 *sensor, uint8_t rate, uint8_t freq);
 
 /* Data acquisition */
-sensorXYZ icm42670_read_accel(ICM42670 *sensor);
-sensorXYZ icm42670_read_gyro(ICM42670 *sensor);
+sensorXYZFloat icm42670_read_accel(ICM42670 *sensor);
+sensorXYZFloat icm42670_read_gyro(ICM42670 *sensor);
 int16_t icm42670_read_temp(ICM42670 *sensor);
 
 /* Register access */
