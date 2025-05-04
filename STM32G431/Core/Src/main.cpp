@@ -295,6 +295,18 @@ volatile float angleb_prev;
 volatile float anglebFull;
 
 
+// Offset distances are 6.7mm & 22.35mm
+
+
+
+
+
+
+
+
+
+
+
 uint8_t failed;
 
 
@@ -734,26 +746,26 @@ int main(void)
 
 
 
-		ENC_Update();
+//		ENC_Update();
 
 
-		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
-
-
-
-
-		pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
+//		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
 
 
 
+//		pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
-		myData.a = anglebFull;
-		myData.b = pid.output;
-		myData.c = pid.error * pid.p;
-		myData.d = pid.target;
-		myData.e = pid.derivative;
+
+
+
+
+		myData.a = angleaFull;
+		myData.b = anglebFull;
+		myData.c = gyro.z;
+		myData.d = gyrob.z;
+		myData.e = 0;
 
 
 
