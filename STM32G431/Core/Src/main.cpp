@@ -278,21 +278,16 @@ struct CHG {
 
 
 
-sensorXYZ accel;
-sensorXYZ gyro;
-sensorXYZ accelb;
-sensorXYZ gyrob;
+// Struct to hold accelerometer and gyro data, and angles
+typedef struct {
+	sensorXYZFloat accel;
+	sensorXYZFloat gyro;
+	sensorXYZFloat lastGyro;
 
-int32_t ACC_FullRotationsA = 0;
-int32_t ACC_FullRotationsB = 0;
+    float rawAngle, angle, anglePrev, angleFull;
+} IMU_Data;
 
-volatile float anglea;
-volatile float anglea_prev;
-volatile float angleaFull;
-
-volatile float angleb;
-volatile float angleb_prev;
-volatile float anglebFull;
+IMU_Data imu_data[2];  // Array to store data for two IMUs
 
 
 // Offset distances are 6.7mm & 22.35mm
@@ -350,7 +345,7 @@ float electricalAngle;
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM6) {
 
-        pid.error = anglebFull - pid.target;
+        pid.error = imu_data[0].angleFull - pid.target;
 
     	if (pid.target != pid.lastTarget){
     		pid.prev_error = pid.error;
@@ -467,41 +462,9 @@ __attribute__((weak)) float _normalizeAngle(float angle){
 
 
 
+uint32_t timestamp;
+uint32_t lastTimestamp;
 
-void ENC_Update(){
-	//		HAL_SPI_DeInit(&hspi2);
-	//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
-	//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
-	//		HAL_SPI_Init(&hspi2);
-
-	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
-
-	txData[0] = 0b1010 << 4;
-	txData[1] = 0x03;
-
-	HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
-
-	lastRawAngle = 0;
-
-	// Extract bits from rawData1 and rawData2
-	lastRawAngle |= ((uint32_t)(rxData[0 + 2]) << 13);  // Upper 8 bits (ANGLE[20:13])
-	lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
-	lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
-
-	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
-
-    float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
-//	    angle_prev_ts = TIM6->CNT;
-    float d_angle = val - angle_prev;
-    // if overflow happened track it as full rotation
-    if(abs(d_angle) > (0.8f*_2PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
-    angle_prev = val;
-
-    angleFull = (float)full_rotations * _2PI + angle_prev;
-
-	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
-	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
-}
 
 
 
@@ -606,8 +569,8 @@ int main(void)
 
 	// Setup rate & scale
 	icm42670_mclk_on(&imuB);
-	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_50_HZ);
-	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_50_HZ);
+	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
 
 	//ICM42670 Init
@@ -617,8 +580,8 @@ int main(void)
 
 	// Setup rate & scale
 	icm42670_mclk_on(&imuA);
-	icm42670_start_accel(&imuA, ICM42670_ACCEL_FS_2G, ICM42670_ODR_50_HZ);
-	icm42670_start_gyro(&imuA, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_50_HZ);
+	icm42670_start_accel(&imuA, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imuA, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
 
 
@@ -696,23 +659,16 @@ int main(void)
 		// Button shut down
 		if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 
-		// Accelerometer stuff
-		accel = icm42670_read_accel(&imuA);
-		gyro = icm42670_read_gyro(&imuA);
+	    // Read accelerometer and gyro data for IMU A (22.35mm offset below point of rotation. X+ is down. Y+ is to the right.)
+	    imu_data[0].accel = icm42670_read_accel(&imuA);
+	    imu_data[0].gyro = icm42670_read_gyro(&imuA);
 
-		// Accelerometer stuff
-		accelb = icm42670_read_accel(&imuB);
-		gyrob = icm42670_read_gyro(&imuB);
+	    // Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
+	    imu_data[1].accel = icm42670_read_accel(&imuB);
+	    imu_data[1].gyro = icm42670_read_gyro(&imuB);
 
-
-
-		anglea = atan2f(accel.y, -accel.x) * 180.0f / (float)M_PI;
-
-	    if(abs(anglea - anglea_prev) > (0.8f * 360.0f) ) ACC_FullRotationsA += ( (anglea - anglea_prev) > 0 ) ? -1 : 1;
-
-	    anglea_prev = anglea;
-
-		angleaFull = (float)ACC_FullRotationsA * 360.0f + anglea_prev;
+	    imu_data[0].rawAngle = atan2f(imu_data[0].accel.y, -imu_data[0].accel.x) * 180.0f / (float)M_PI;
+	    imu_data[1].rawAngle = atan2f(imu_data[1].accel.y, -imu_data[1].accel.x) * 180.0f / (float)M_PI;
 
 
 
@@ -721,13 +677,81 @@ int main(void)
 
 
 
-		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
 
-	    if(abs(angleb - angleb_prev) > (0.8f * 360.0f) ) ACC_FullRotationsB += ( (angleb - angleb_prev) > 0 ) ? -1 : 1;
 
-		angleb_prev = angleb;
 
-		anglebFull = (float)ACC_FullRotationsB * 360.0f + angleb_prev;
+	    uint32_t timestamp = TIM2->CNT;
+	    float dt = (timestamp - lastTimestamp) / 1000000.0f;
+	    lastTimestamp = timestamp;
+
+
+	    // Constants
+	    #define RADIUS_A  0.02235f  // 22.35 mm for IMU A offset (in meters)
+	    #define RADIUS_B  0.0067f   // 6.7 mm for IMU B offset (in meters)
+	    #define G_SI      9.80665f  // Standard gravity in m/s^2
+		#define DEG2RAD  ((float)(M_PI / 180.0f))
+		#define G2MS2    9.80665f
+
+	    // IMU A (22.35mm offset)
+	    float omegaA = imu_data[0].gyro.z * DEG2RAD;
+	    float omegaA_prev = imu_data[0].lastGyro.z * DEG2RAD;  // Previous angular velocity for IMU A
+
+	    // Compute angular acceleration for IMU A: alpha = (omega_current - omega_previous) / dt
+	    float alphaA = (omegaA - omegaA_prev) / dt;
+
+	    // Compute centripetal acceleration for IMU A: a_centripetal = r * omega^2
+	    float a_centripetal_A = -RADIUS_A * omegaA * omegaA;  // toward center (X-)
+
+	    // Compute tangential acceleration for IMU A: a_tangential = r * alpha
+	    float a_tangential_A  =  RADIUS_A * alphaA;           // Y+, for +α
+
+	    // Compensate accelerometer data for IMU A (correct for both radial and tangential acceleration)
+	    float accX_corr_A = imu_data[0].accel.x * G_SI - a_centripetal_A;
+	    float accY_corr_A = imu_data[0].accel.y * G_SI - a_tangential_A;
+
+	    // Compute the gravity angle for IMU A
+	    imu_data[0].angle = atan2f(accY_corr_A, -accX_corr_A) * 180.0f / (float)M_PI;
+
+
+
+	    // IMU B (6.7mm offset)
+	    float omegaB = imu_data[1].gyro.z * DEG2RAD;  // Current angular velocity (rad/s) for IMU B
+	    float omegaB_prev = imu_data[1].lastGyro.z * DEG2RAD;  // Previous angular velocity for IMU B
+
+	    // Compute angular acceleration for IMU B: alpha = (omega_current - omega_previous) / dt
+	    float alphaB = (omegaB - omegaB_prev) / dt;
+
+	    // Compute centripetal acceleration for IMU B: a_centripetal = r * omega^2
+	    float a_centripetal_B = RADIUS_B * omegaB * omegaB;   // toward center (X+)
+
+	    // Compute tangential acceleration for IMU B: a_tangential = r * alpha
+	    float a_tangential_B  = -RADIUS_B * alphaB;           // Y-, for +α
+
+	    // Compensate accelerometer data for IMU B (correct for both radial and tangential acceleration)
+	    float accX_corr_B = imu_data[1].accel.x * G_SI - a_centripetal_B;
+	    float accY_corr_B = imu_data[1].accel.y * G_SI - a_tangential_B;
+
+	    // Compute the gravity angle for IMU B
+	    imu_data[1].angle = atan2f(accY_corr_B, -accX_corr_B) * 180.0f / (float)M_PI;
+
+	    // Save current gyro values for the next iteration
+	    imu_data[0].lastGyro.z = imu_data[0].gyro.z;
+	    imu_data[1].lastGyro.z = imu_data[1].gyro.z;
+
+
+
+	    float delta_anglea = imu_data[0].angle - imu_data[0].anglePrev;
+	    if (delta_anglea > 180.0f) delta_anglea -= 360.0f;
+	    else if (delta_anglea < -180.0f) delta_anglea += 360.0f;
+	    imu_data[0].angleFull += delta_anglea;
+	    imu_data[0].anglePrev = imu_data[0].angle;
+
+
+	    float delta_angleb = imu_data[1].angle - imu_data[1].anglePrev;
+	    if (delta_angleb > 180.0f) delta_angleb -= 360.0f;
+	    else if (delta_angleb < -180.0f) delta_angleb += 360.0f;
+	    imu_data[1].angleFull += delta_angleb;
+	    imu_data[1].anglePrev = imu_data[1].angle;
 
 
 
@@ -749,7 +773,7 @@ int main(void)
 //		ENC_Update();
 
 
-//		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
+//		electricalAngle = _normalizeAngle((float)POLE_PAIRS * anglePrev - zero_electric_angle);
 
 
 
@@ -761,11 +785,11 @@ int main(void)
 
 
 
-		myData.a = angleaFull;
-		myData.b = anglebFull;
-		myData.c = gyro.z;
-		myData.d = gyrob.z;
-		myData.e = 0;
+		myData.a = imu_data[0].angleFull;
+		myData.b = imu_data[1].angleFull;
+		myData.c = imu_data[0].rawAngle;
+		myData.d = imu_data[1].rawAngle;
+		myData.e = accY_corr_A;
 
 
 

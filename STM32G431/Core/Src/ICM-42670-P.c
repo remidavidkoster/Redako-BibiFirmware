@@ -143,13 +143,13 @@ HAL_StatusTypeDef icm42670_start_accel(ICM42670 *sensor, uint8_t scale, uint8_t 
 HAL_StatusTypeDef icm42670_start_gyro(ICM42670 *sensor, uint8_t rate, uint8_t freq) {
     switch (rate) {
         case ICM42670_GYRO_FS_2000_DPS:
-            sensor->gyro_calib = 16.4;
+            sensor->gyro_calib = 16.4f;
             break;
         case ICM42670_GYRO_FS_1000_DPS:
-            sensor->gyro_calib = 32.8;
+            sensor->gyro_calib = 32.8f;
             break;
         case ICM42670_GYRO_FS_500_DPS:
-            sensor->gyro_calib = 65.5;
+            sensor->gyro_calib = 65.5f;
             break;
         case ICM42670_GYRO_FS_250_DPS:
             sensor->gyro_calib = 131;
@@ -171,9 +171,9 @@ HAL_StatusTypeDef icm42670_start_gyro(ICM42670 *sensor, uint8_t rate, uint8_t fr
 }
 
 // Get accelerometer data
-sensorXYZ icm42670_read_accel(ICM42670 *sensor) {
+sensorXYZFloat icm42670_read_accel(ICM42670 *sensor) {
     uint8_t readBuffer[1];
-    sensorXYZ sensorData = {0, 0, 0};
+    sensorXYZFloat sensorData = {0, 0, 0};
     sensorXYZ raw = {0, 0, 0};
 
     if (icm42670_read_register(sensor, ICM42670_REG_ACCEL_DATA_X1, readBuffer, 1)!=HAL_OK) {
@@ -203,16 +203,16 @@ sensorXYZ icm42670_read_accel(ICM42670 *sensor) {
     }
     raw.z |= readBuffer[0];
 
-    sensorData.x = (raw.x * 1000) / sensor->accel_calib;
-    sensorData.y = (raw.y * 1000) / sensor->accel_calib;
-    sensorData.z = (raw.z * 1000) / sensor->accel_calib;
+    sensorData.x = raw.x / (float)sensor->accel_calib;
+    sensorData.y = raw.y / (float)sensor->accel_calib;
+    sensorData.z = raw.z / (float)sensor->accel_calib;
     return sensorData;
 }
 
 // Get gyroscope data
-sensorXYZ icm42670_read_gyro(ICM42670 *sensor) {
+sensorXYZFloat icm42670_read_gyro(ICM42670 *sensor) {
     uint8_t readBuffer[1];
-    sensorXYZ sensorData = {0, 0, 0};
+    sensorXYZFloat sensorData = {0, 0, 0};
     sensorXYZ raw = {0, 0, 0};
 
     if (icm42670_read_register(sensor, ICM42670_REG_GYRO_DATA_X1, readBuffer, 1)!=HAL_OK) {
@@ -242,9 +242,9 @@ sensorXYZ icm42670_read_gyro(ICM42670 *sensor) {
     }
     raw.z |= readBuffer[0];
 
-    sensorData.x = (raw.x * 1000) / sensor->gyro_calib;
-    sensorData.y = (raw.y * 1000) / sensor->gyro_calib;
-    sensorData.z = (raw.z * 1000) / sensor->gyro_calib;
+    sensorData.x = raw.x / (float)sensor->gyro_calib;
+    sensorData.y = raw.y / (float)sensor->gyro_calib;
+    sensorData.z = raw.z / (float)sensor->gyro_calib;
     return sensorData;
 }
 
