@@ -288,6 +288,7 @@ struct CHG {
 typedef struct {
 	sensorXYZFloat accel;
 	sensorXYZFloat gyro;
+	sensorXYZFloat gyroZerod;
 	sensorXYZFloat lastGyro;
 
 	float rawAngle, angle, anglePrev, angleFull;
@@ -333,9 +334,9 @@ typedef struct {
 
 
 PIDController pid = {
-		.p = 0.0f,
-		.i = 0.00000f,
-		.d = 0.0f,
+		.p = 0.02f,
+		.i = 0.00005f,
+		.d = 400.0f,
 		.alpha = 0.001f,  // Set this based on how much filtering you want
 		.limit = 5.65f,
 		.target = 0.0f
@@ -347,11 +348,12 @@ float speed;
 
 float electricalAngle;
 
+volatile float madwickAngleFull;
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if (htim->Instance == TIM6) {
 
-		pid.error = imu_data.angleFull - pid.target;
+		pid.error = madwickAngleFull - pid.target;
 
 		if (pid.target != pid.lastTarget){
 			pid.prev_error = pid.error;
@@ -541,6 +543,95 @@ unsigned long microsPerReading, microsPrevious;
 
 
 
+float gyro_offsets[3] = {0.0, 0.0, 0.0}; // To store the gyro offsets
+
+// Function to calculate the standard deviation of a given array
+float calculate_standard_deviation(float *data, int num_samples) {
+    float sum = 0.0;
+    float mean, stddev = 0.0;
+
+    // Calculate the mean
+    for (int i = 0; i < num_samples; i++) {
+        sum += data[i];
+    }
+    mean = sum / num_samples;
+
+    // Calculate the standard deviation
+    for (int i = 0; i < num_samples; i++) {
+        stddev += pow(data[i] - mean, 2);
+    }
+    return sqrt(stddev / num_samples);
+}
+
+
+#define STABILITY_THRESHOLD 0.002f  // Threshold for accelerometer standard deviation
+#define NUM_SAMPLES 100          // Number of samples to collect for both accelerometer and gyro
+#define GRAVITY 9.81f             // Gravity constant in m/s^2
+
+float accel_x_stddev;
+float accel_y_stddev;
+float accel_z_stddev;
+
+void waitForStableGetGyroOffsets(){
+	while (1) {
+	    // Arrays to store accelerometer and gyro samples
+	    float accel_x_samples[NUM_SAMPLES] = {0};
+	    float accel_y_samples[NUM_SAMPLES] = {0};
+	    float accel_z_samples[NUM_SAMPLES] = {0};
+	    float gyro_x_samples[NUM_SAMPLES] = {0};
+	    float gyro_y_samples[NUM_SAMPLES] = {0};
+	    float gyro_z_samples[NUM_SAMPLES] = {0};
+
+	    // Collect NUM_SAMPLES samples of accelerometer and gyro data
+	    for (int i = 0; i < NUM_SAMPLES; i++) {
+	        imu_data.accel = icm42670_read_accel(&imu); // Replace with actual accel read function
+	        imu_data.gyro = icm42670_read_gyro(&imu);   // Replace with actual gyro read function
+
+	        // Store the accelerometer and gyro samples
+	        accel_x_samples[i] = imu_data.accel.x;
+	        accel_y_samples[i] = imu_data.accel.y;
+	        accel_z_samples[i] = imu_data.accel.z;
+	        gyro_x_samples[i] = imu_data.gyro.x;
+	        gyro_y_samples[i] = imu_data.gyro.y;
+	        gyro_z_samples[i] = imu_data.gyro.z;
+
+	        // Optional: Add a small delay between samples if necessary
+	        HAL_Delay(10);
+	    }
+
+	    // Calculate the standard deviation for each axis of the accelerometer
+	    accel_x_stddev = calculate_standard_deviation(accel_x_samples, NUM_SAMPLES);
+	    accel_y_stddev = calculate_standard_deviation(accel_y_samples, NUM_SAMPLES);
+	    accel_z_stddev = calculate_standard_deviation(accel_z_samples, NUM_SAMPLES);
+
+	    // If the standard deviation of all axes is below the threshold, the accelerometer is stable
+	    if (accel_x_stddev < STABILITY_THRESHOLD && accel_y_stddev < STABILITY_THRESHOLD && accel_z_stddev < STABILITY_THRESHOLD) {
+	        //printf("Accelerometer is stable. Proceeding to gyro offset calculation...\n");
+
+	        // Calculate the average of the gyro readings
+	        float sum_gyro[3] = {0.0f, 0.0f, 0.0f};
+	        for (int i = 0; i < NUM_SAMPLES; i++) {
+	            sum_gyro[0] += gyro_x_samples[i];
+	            sum_gyro[1] += gyro_y_samples[i];
+	            sum_gyro[2] += gyro_z_samples[i];
+	        }
+
+	        gyro_offsets[0] = sum_gyro[0] / NUM_SAMPLES;
+	        gyro_offsets[1] = sum_gyro[1] / NUM_SAMPLES;
+	        gyro_offsets[2] = sum_gyro[2] / NUM_SAMPLES;
+
+	        //printf("Gyro Offsets: X: %f, Y: %f, Z: %f\n", gyro_offsets[0], gyro_offsets[1], gyro_offsets[2]);
+	        break;  // Exit the loop since we have successfully calculated the gyro offsets
+	    } else {
+	        //printf("Accelerometer is not stable. Retrying...\n");
+	    }
+
+	    // Optional: Add a small delay before trying again if needed
+	    // usleep(10000); // Sleep for 10ms (if required)
+	}
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -701,8 +792,19 @@ int main(void)
 
 
 
+
+
+
+
+
+
+
+
+	waitForStableGetGyroOffsets();
+
+
 	setPhaseVoltage(5.65, _3PI_2);
-	HAL_Delay(2000);
+	HAL_Delay(4000);
 	ENC_Update();
 	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
 	setPhaseVoltage(0, _3PI_2);
@@ -793,49 +895,12 @@ int main(void)
 			imu_data.accel = icm42670_read_accel(&imu);
 			imu_data.gyro = icm42670_read_gyro(&imu);
 
-			imu_data.rawAngle = atan2f(imu_data.accel.y, -imu_data.accel.x) * 180.0f / (float)M_PI;
-
-
-
-			uint32_t timestamp = TIM2->CNT;
-			float dt = (timestamp - lastTimestamp) / 1000000.0f;
-			lastTimestamp = timestamp;
-
-
-			// Constants
-#define RADIUS_B  0.0067f   // 6.7 mm for IMU B offset (in meters)
-#define G_SI      9.80665f  // Standard gravity in m/s^2
-#define DEG2RAD  ((float)(M_PI / 180.0f))
-#define G2MS2    9.80665f
-
-			// IMU B (6.7mm offset)
-			float omegaB = imu_data.gyro.z * DEG2RAD;  // Current angular velocity (rad/s) for IMU B
-			float omegaB_prev = imu_data.lastGyro.z * DEG2RAD;  // Previous angular velocity for IMU B
-
-			// Compute angular acceleration for IMU B: alpha = (omega_current - omega_previous) / dt
-			float alphaB = (omegaB - omegaB_prev) / dt;
-
-			// Compute centripetal acceleration for IMU B: a_centripetal = r * omega^2
-			float a_centripetal_B = RADIUS_B * omegaB * omegaB;   // toward center (X+)
-
-			// Compute tangential acceleration for IMU B: a_tangential = r * alpha
-			float a_tangential_B  = -RADIUS_B * alphaB;           // Y-, for +α
-
-			// Compensate accelerometer data for IMU B (correct for both radial and tangential acceleration)
-			float accX_corr_B = imu_data.accel.x * G_SI - a_centripetal_B;
-			float accY_corr_B = imu_data.accel.y * G_SI - a_tangential_B;
-
-			// Compute the gravity angle for IMU B
-			imu_data.angle = atan2f(accY_corr_B, -accX_corr_B) * 180.0f / (float)M_PI;
-
-			// Save current gyro values for the next iteration
-			imu_data.lastGyro.z = imu_data.gyro.z;
-			imu_data.lastGyro.z = imu_data.gyro.z;
-
-
+			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
+			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
+			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
 
 			// update the filter, which computes orientation
-			filter.updateIMU(imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z, imu_data.accel.x, imu_data.accel.y, imu_data.accel.z);
+			filter.updateIMU(imu_data.gyroZerod.x, imu_data.gyroZerod.y, imu_data.gyroZerod.z, imu_data.accel.x, imu_data.accel.y, imu_data.accel.z);
 
 			float roll = filter.getRoll();
 			float pitch = filter.getPitch();
@@ -843,7 +908,6 @@ int main(void)
 
 			float madwickAngle = (roll < 0) ? pitch - 90 : 90 - pitch;
 			static float madwickAnglePrev;
-			static float madwickAngleFull;
 			static int madwickTurns;
 
 
@@ -869,23 +933,7 @@ int main(void)
 
 
 
-			// Assuming imu_data.angle is in [0, 360)
-			float current_angle = imu_data.angle;
-			float previous_angle = imu_data.anglePrev;
 
-			float delta_angle = current_angle - previous_angle;
-
-			// Detect wrap-around and update turn counter
-			if (delta_angle > 180.0f) {
-				imu_data.turns--; // Rotated backwards across 0°
-			} else if (delta_angle < -180.0f) {
-				imu_data.turns++; // Rotated forward across 360°
-			}
-
-			imu_data.anglePrev = current_angle;
-
-			// Compute total angle
-			imu_data.angleFull = current_angle + 360.0f * imu_data.turns;
 
 			//		if (NRF_DataReady()) {
 			//			NRF_GetData(buffer);
@@ -910,7 +958,7 @@ int main(void)
 
 
 
-			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
+			pid.target = TIM2->CNT / 3000000 & 1 ? 90 : -90;
 
 
 
@@ -918,10 +966,10 @@ int main(void)
 
 
 
-			myData.a = imu_data.angleFull;
-			myData.b = roll;
-			myData.c = madwickAngleFull;
-			myData.d = heading;
+			myData.a = roll;
+			myData.b = pitch;
+			myData.c = heading;
+			myData.d = madwickAngleFull;
 			myData.e = 0;
 
 
