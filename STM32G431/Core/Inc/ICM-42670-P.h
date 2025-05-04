@@ -198,7 +198,7 @@ typedef struct
   float z;  /* Z-axis data */
 } sensorXYZFloat;
 
-
+extern int16_t zDebug;
 
 
 /**

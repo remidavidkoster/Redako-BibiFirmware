@@ -585,6 +585,14 @@ int main(void)
 
 
 
+	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
+
+	icm42670_write(&imuA, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
+	icm42670_write(&imuB, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
+
+
+
+
 //
 //	setPhaseVoltage(5.65, _3PI_2);
 //	HAL_Delay(2000);
@@ -785,10 +793,10 @@ int main(void)
 
 
 
-		myData.a = imu_data[0].gyro.z;
-		myData.b = imu_data[1].gyro.z;
-		myData.c = 0;
-		myData.d = 0;
+		myData.a = imu_data[0].angleFull;
+		myData.b = imu_data[1].angleFull;
+		myData.c = imu_data[0].rawAngle;
+		myData.d = imu_data[1].rawAngle;
 		myData.e = 0;
 
 

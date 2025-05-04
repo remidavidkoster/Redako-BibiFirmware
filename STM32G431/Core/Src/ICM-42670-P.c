@@ -209,6 +209,9 @@ sensorXYZFloat icm42670_read_accel(ICM42670 *sensor) {
     return sensorData;
 }
 
+
+int16_t zDebug;
+
 // Get gyroscope data
 sensorXYZFloat icm42670_read_gyro(ICM42670 *sensor) {
     uint8_t readBuffer[1];
@@ -241,6 +244,8 @@ sensorXYZFloat icm42670_read_gyro(ICM42670 *sensor) {
         return sensorData; // Failure
     }
     raw.z |= readBuffer[0];
+
+    zDebug = raw.z;
 
     sensorData.x = raw.x / (float)sensor->gyro_calib;
     sensorData.y = raw.y / (float)sensor->gyro_calib;
