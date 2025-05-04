@@ -283,7 +283,12 @@ sensorXYZ gyro;
 sensorXYZ accelb;
 sensorXYZ gyrob;
 
-int32_t ACC_FullRotations = 0;
+int32_t ACC_FullRotationsA = 0;
+int32_t ACC_FullRotationsB = 0;
+
+volatile float anglea;
+volatile float anglea_prev;
+volatile float angleaFull;
 
 volatile float angleb;
 volatile float angleb_prev;
@@ -588,21 +593,32 @@ int main(void)
 
 	// Setup rate & scale
 	icm42670_mclk_on(&imuB);
-	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	icm42670_start_accel(&imuB, ICM42670_ACCEL_FS_2G, ICM42670_ODR_50_HZ);
+	icm42670_start_gyro(&imuB, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_50_HZ);
+
+
+	//ICM42670 Init
+	if(icm42670_init(&imuA, ICM42670_DEFAULT_ADDRESS, &hi2c1) != HAL_OK){
+		failed = 1;
+	}
+
+	// Setup rate & scale
+	icm42670_mclk_on(&imuA);
+	icm42670_start_accel(&imuA, ICM42670_ACCEL_FS_2G, ICM42670_ODR_50_HZ);
+	icm42670_start_gyro(&imuA, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_50_HZ);
 
 
 
+//
+//	setPhaseVoltage(5.65, _3PI_2);
+//	HAL_Delay(2000);
+//	ENC_Update();
+//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
+//	setPhaseVoltage(0, _3PI_2);
 
-	setPhaseVoltage(5.65, _3PI_2);
-	HAL_Delay(2000);
-	ENC_Update();
-	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
-	setPhaseVoltage(0, _3PI_2);
+//	configNRF(10);
 
-	configNRF(10);
-
-	HAL_TIM_Base_Start_IT(&htim6);
+//	HAL_TIM_Base_Start_IT(&htim6);
 
 //	while (1){
 //		// Read battery Voltage
@@ -668,8 +684,25 @@ int main(void)
 		if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 
 		// Accelerometer stuff
+		accel = icm42670_read_accel(&imuA);
+		gyro = icm42670_read_gyro(&imuA);
+
+		// Accelerometer stuff
 		accelb = icm42670_read_accel(&imuB);
 		gyrob = icm42670_read_gyro(&imuB);
+
+
+
+		anglea = atan2f(accel.y, -accel.x) * 180.0f / (float)M_PI;
+
+	    if(abs(anglea - anglea_prev) > (0.8f * 360.0f) ) ACC_FullRotationsA += ( (anglea - anglea_prev) > 0 ) ? -1 : 1;
+
+	    anglea_prev = anglea;
+
+		angleaFull = (float)ACC_FullRotationsA * 360.0f + anglea_prev;
+
+
+
 
 
 
@@ -677,11 +710,11 @@ int main(void)
 
 		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
 
-	    if(abs(angleb - angleb_prev) > (0.8f * 360.0f) ) ACC_FullRotations += ( (angleb - angleb_prev) > 0 ) ? -1 : 1;
+	    if(abs(angleb - angleb_prev) > (0.8f * 360.0f) ) ACC_FullRotationsB += ( (angleb - angleb_prev) > 0 ) ? -1 : 1;
 
 		angleb_prev = angleb;
 
-		anglebFull = (float)ACC_FullRotations * 360.0f + angleb_prev;
+		anglebFull = (float)ACC_FullRotationsB * 360.0f + angleb_prev;
 
 
 
