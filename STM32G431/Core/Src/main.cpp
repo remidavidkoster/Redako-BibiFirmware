@@ -13,6 +13,9 @@
 #include "S4_CurvePlanner.h"
 #include <string.h>
 
+S4_CurvePlanner planner(1000);
+
+
 void SystemClock_Config(void);
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -832,23 +835,49 @@ int main(void) {
 
 			if (movement.start){
 				movement.start = 0;
-				movement.running = 1;
-				movement.startTimestamp = TIM2->CNT;
-				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
+//				movement.running = 1;
+//				movement.startTimestamp = TIM2->CNT;
+//				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
+
+				planner.Initiate_Move(movement.distance);
+
 			}
 
 
 
-			if (movement.running) {
-				uint32_t runTime = TIM2->CNT - movement.startTimestamp;
+//			if (movement.running) {
+//				uint32_t runTime = TIM2->CNT - movement.startTimestamp;
+//
+//				electricalAngle = (movement.startOffset + get_position(runTime, movement.duration, movement.distance)) * METERS2RAD * POLE_PAIRS;
+//
+//				if (runTime >= movement.duration) {
+//					movement.running = 0;
+//					movement.distance = -movement.distance;
+//				}
+//			}
 
-				electricalAngle = (movement.startOffset + get_position(runTime, movement.duration, movement.distance)) * METERS2RAD * POLE_PAIRS;
 
-				if (runTime >= movement.duration) {
-					movement.running = 0;
-					movement.distance = -movement.distance;
+			// see if we are in a move or not
+			if (planner.isTrajectoryExecuting){
+				// we are in a move, let's calc the next position
+				float timeSinceStartingTrajectoryInSeconds = (TIM2->CNT - planner.plannerStartingMovementTimeStamp) / 1000000.0f;
+				planner.RuntimePlanner(timeSinceStartingTrajectoryInSeconds);
+				electricalAngle = planner.pos_target;
+
+
+				// see if we are done with our move
+				if (timeSinceStartingTrajectoryInSeconds >= planner.Tf){
+					// we are done with move
+
+					planner.isTrajectoryExecuting = false;
 				}
 			}
+
+
+
+
+
+
 
 
 
@@ -875,15 +904,15 @@ int main(void) {
 //			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
-			myData.a = diaboloAngleFull;
-			myData.b = 0;//est_vel;
-			myData.c = 0;//est_acc;
-			myData.d = madgwick.angleFull;
+			myData.a = planner.pos_target;
+			myData.b = planner.vel_target;//est_vel;
+			myData.c = planner.acel_now;//est_acc;
+			myData.d = planner.jerk_now;
 			myData.e = 0;
 
 
 
-			sendFloats(&myData);
+			if (planner.isTrajectoryExecuting) sendFloats(&myData);
 
 			//		NRF_Send(buffer);
 			//		while (NRF_IsSending());

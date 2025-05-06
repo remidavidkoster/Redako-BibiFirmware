@@ -5,10 +5,6 @@ class S4_CurvePlanner {
 public:
 
     S4_CurvePlanner(int);
-//    void executeCommand(char *command, char *command2);
-//    void doGcommandBuffer(char *command);
-//    void doMCommand(char *command);
-//    void linkMotor(FOCMotor*);
     void runPlannerOnTick();
     bool isPlannerMoving();
     void resetTimeVariables();
@@ -21,12 +17,11 @@ public:
     bool Vi_is_positive = false;
     float last_time;
 
-private:
     
     //SETUP
 //    FOCMotor * motor;
     unsigned long plannerTimeStep;
-    unsigned int plannerPeriod = 1; // 1000 / this number = Hz, i.e. 1000 / 100 = 10Hz, 1000 / 10 = 100Hz, 1000 / 5 = 200Hz, 1000 / 1 = 1000hZ
+    unsigned int plannerPeriod = 1000; // 1000000 / this number = Hz, i.e. 1000000 / 100000 = 10Hz, 1000000 / 10000 = 100Hz, 1000000 / 5000 = 200Hz, 1000000 / 1000 = 1000hZ
     float _Vmax_ = 30.0f;    // # Velocity max (rads/s)
     float _Amax_ = 20.0f;    // # Acceleration max (rads/s/s)
     float _Jmax_ = 20.0f;    // # Jerk max (rads/s/s/s)

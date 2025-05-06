@@ -27,55 +27,8 @@ float mapfloat(float x, float in_min, float in_max, float out_min, float out_max
 }
 
 //
-//void S4_CurvePlanner::doGcommandBuffer(char *gCodeCommand){
-//
-//        buffer.push(gCodeCommand);
-//}
-
-//
 //void S4_CurvePlanner::doMCommand(char *MCommand){
-//  #ifdef __debug
-//        //SerialUSB.print("GGode command: M");
-//        //SerialUSB.println(MCommand);
-//    #endif
-//
-//
-//      // Parse this string for vals to int
-//        String commandSrt = String(MCommand);
-//        int commandValue_Int = 0;
-//        commandValue_Int = commandSrt.toInt();
-//
-//
-//    // The controller must be able to report its capabilities, typically with the M115 command.
-//    if (commandValue_Int == 115){
-//        // M115
-//        // Send firmware version and capabilities
-//        // Note: Not final. Suggested by co-pilot.
-//        SerialUSB.println("FIRMWARE_NAME: ** CurvePlanner-S4 ** ");
-//        SerialUSB.println("FIRMWARE_VERSION: ** 1.0.1 ** ");
-//        SerialUSB.println("FIRMWARE_URL:");
-//        SerialUSB.println("https://github.com/Juanduino/S4_CurvePlanner/tree/main/S4_CurvePlanner");
-//        SerialUSB.println("PROTOCOL_VERSION: ** 1.0.1 **");
-//        SerialUSB.println("AVAILABLE_COMMANDS:M, G");
-//        SerialUSB.println("CAPABILITY:TRAJECTORY_CONTROL");
-//        SerialUSB.println("POWER_SUPPLY:");
-//        SerialUSB.println(voltage_power_supply);
-//        SerialUSB.println("MOTOR_VOLTAGE_LIMIT:");
-//        SerialUSB.println(voltage_limit);
-//        SerialUSB.println("SENSE_VOLTAGE:");
-//        SerialUSB.println(voltage_sense_divider);
-//
-//        SerialUSB.println("LAST_POSITION:");
-//        SerialUSB.println(Last_position);
-//        SerialUSB.println("LAST_VEL:");
-//        SerialUSB.println(last_velocity);
-//        SerialUSB.println("LAST_ACCEL:");
-//        SerialUSB.println(last_acceleratio);
-//        SerialUSB.println("deltaTIME:");
-//        SerialUSB.println(deltaTime);
-//
-//
-//        }
+
 //
 //    /***********************************************************************************
 //
@@ -383,75 +336,27 @@ void S4_CurvePlanner::runPlannerOnTick(){
 	// This could run 10 000 times / second (10kHz) ?
 	//  https://www.youtube.com/watch?v=EYWEprqoLAQ
 
-	if ((unsigned long)(((TIM2->CNT+500ul)/1000ul) - plannerTimeStep) > plannerPeriod){
-		plannerTimeStep = ((TIM2->CNT+500ul)/1000ul);
+	if ((unsigned long)(TIM2->CNT - plannerTimeStep) > plannerPeriod){
+		plannerTimeStep = TIM2->CNT;
 
-
-
-		if (!isTrajectoryExecuting){
-			// we are not in a move, let's see if we have a new move to start
-
-
-			//    if (!buffer.isEmpty()){
-			// we have a new move to start
-			//        buffer.pop(tailItem, nextItem);
-
-#ifdef __debug
-			SerialUSB.println("tailItem: ");
-			SerialUSB.println(tailItem);
-			SerialUSB.println("nextItem: ");
-			SerialUSB.println(nextItem);
-#endif
-
-//			executeCommand(tailItem, nextItem);
-		}
-		//        }
 		float timeSinceStartingTrajectoryInSeconds;
+
 		// see if we are in a move or not
 		if (isTrajectoryExecuting){
 			// we are in a move, let's calc the next position
-			timeSinceStartingTrajectoryInSeconds = (((TIM2->CNT+500)/1000) - plannerStartingMovementTimeStamp) / 1000.0f;
+			timeSinceStartingTrajectoryInSeconds = ((TIM2->CNT) - plannerStartingMovementTimeStamp) / 1000000.0f;
 			RuntimePlanner(timeSinceStartingTrajectoryInSeconds);
-			//        motor->target = vel_target;
-
-//			float EventHorizon =    0.1f; // 100ms
-
-			//        if (!buffer.isEmpty() && !m400_flag && timeSinceStartingTrajectoryInSeconds >= ((t1 + t2) - EventHorizon)){
-
-			//        buffer.pop(tailItem, nextItem);
-
-//			executeCommand(tailItem, nextItem);
-
+			// motor->target = vel_target;
 		}
-
-
 
 		// see if we are done with our move
 		if (timeSinceStartingTrajectoryInSeconds >= Tf){
 			// we are done with move
-			// motor.monitor_downsample = 0; // disable monitor
-#ifdef __debug
-			SerialUSB.println("Done with move");
-#endif
-
-			//        SerialUSB.println("ok");
-			//        float map_pos = mapfloat(motor->shaft_angle, 0, 2*PI, 0, buffer.mm_per_rev);
-			//        SerialUSB.print("X:");
-			//        SerialUSB.println(map_pos, 4);
-			//        SerialUSB.print("Shaft angle:");
-			//        SerialUSB.println(motor->shaft_angle, 4);
-
 
 			isTrajectoryExecuting = false;
-
-			if (m400_flag){
-				//        Serial.println("ok");
-				m400_flag = false;}
-
 		}
 	}
 }
-
 
 
 
@@ -1142,6 +1047,8 @@ SerialUSB.print("v7_rd: "); SerialUSB.println(v7_rd);
 	last_velocity = Vi;
 	Last_position = Xi;
 
+	Tf = t15 + T15;
+
 	return true;
 }
 
@@ -1155,8 +1062,8 @@ void S4_CurvePlanner::Initiate_Move(float Pos){
 	// set our global of the new position
 	Xf_ = Pos;
 
-	// At this poin we are atarting to move following the trapezoidal profile
-	plannerStartingMovementTimeStamp = ((TIM2->CNT+500)/1000);
+	// At this point we are starting to move following the trapezoidal profile
+	plannerStartingMovementTimeStamp = TIM2->CNT;
 
 	// take the position from SimpleFOC and set it to our start position
 	//    Xi_ = motor->shaft_angle;
@@ -1213,7 +1120,7 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 		deltaTime = now_ - last_time;
 		//convert to seconds
 		//deltaTime = deltaTime / 1e6f;
-		deltaTime = 0.025f;
+		deltaTime = 0.001f;
 
 		tau1 = t - t0;
 
@@ -1250,7 +1157,7 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 		deltaTime = now_ - last_time;
 		//convert to seconds
 		//deltaTime = deltaTime / 1e6f;
-		deltaTime = 0.025f;
+		deltaTime = 0.001f;
 
 		tau2 = t - t1;
 
@@ -1300,7 +1207,7 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 			float v5_2 = v5 + vmax;
 			jerk_now = - jmax + ((jmax / T3) * tau3);
 			acel_now = - (jmax * tau3) + (jmax / (2 * T3)) * pow(tau3, 2) - (jmax / 2) * (T3 + (2 * T4));
-			vel_target = - (jmax / 2.0) * pow(tau3, 2) + ((jmax / (6.0 * T3)) * pow(tau3, 3)) - ((jmax / 2.0) * (T3 + (2 * T4))) * tau3 + v5_2;
+			vel_target = - (jmax / 2.0) * pow(tau3, 2) + ((jmax / (6.0f * T3)) * pow(tau3, 3)) - ((jmax / 2.0) * (T3 + (2 * T4))) * tau3 + v5_2;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}
 
@@ -1363,14 +1270,14 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 
 		if (!double_decel_move){
 			jerk_now = - (jmax / T5) * tau5;
-			acel_now = - (jmax / (2.0 * T5)) * pow(tau5, 2) + amax;
-			vel_target = -jmax / (6.0 * T5) * pow(tau5, 3) + amax * tau5 + v4;
+			acel_now = - (jmax / (2.0f * T5)) * pow(tau5, 2) + amax;
+			vel_target = -jmax / (6.0f * T5) * pow(tau5, 3) + amax * tau5 + v4;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		} else {
 			float v3_2 = v3 + vmax;
 			jerk_now = jmax / T5 * tau5;
-			acel_now =  (jmax / (2.0 * T5)) * pow(tau5, 2) - amax;
-			vel_target = jmax / (6.0 * T5) * pow(tau5, 3) - amax * tau5 + v3_2;
+			acel_now =  (jmax / (2.0f * T5)) * pow(tau5, 2) - amax;
+			vel_target = jmax / (6.0f * T5) * pow(tau5, 3) - amax * tau5 + v3_2;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}
 
@@ -1437,14 +1344,14 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 
 		if (!double_decel_move){
 			jerk_now = - jmax + ((jmax / T7) * tau7);
-			acel_now = - (jmax * tau7) + ((jmax / (2.0 * T7)) * pow(tau7, 2)) + amax - ((jmax / 2.0) * T5) - (jmax * T6);
-			vel_target = - (jmax / 2.0) * pow(tau7, 2) + (jmax / (6.0 * T7)) * pow(tau7, 3) + (amax - (jmax / 2.0) * T5 - (jmax * T6)) * tau7 + v6;
+			acel_now = - (jmax * tau7) + ((jmax / (2.0f * T7)) * pow(tau7, 2)) + amax - ((jmax / 2.0) * T5) - (jmax * T6);
+			vel_target = - (jmax / 2.0) * pow(tau7, 2) + (jmax / (6.0f * T7)) * pow(tau7, 3) + (amax - (jmax / 2.0) * T5 - (jmax * T6)) * tau7 + v6;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}else{
 			float v1_2 = v1 + vmax;
 			jerk_now = jmax - (jmax / T7) * tau7;
-			acel_now =  (jmax * tau7) - ((jmax / (2.0 * T7)) * pow(tau7, 2)) - amax + ((jmax / 2.0) * T5) + (jmax * T6);
-			vel_target = (jmax / 2.0) * pow(tau7, 2) - (jmax / (6.0 * T7)) * pow(tau7, 3) - (amax - (jmax / 2.0) * T5 - (jmax * T6)) * tau7 + v1_2;
+			acel_now =  (jmax * tau7) - ((jmax / (2.0f * T7)) * pow(tau7, 2)) - amax + ((jmax / 2.0) * T5) + (jmax * T6);
+			vel_target = (jmax / 2.0) * pow(tau7, 2) - (jmax / (6.0f * T7)) * pow(tau7, 3) - (amax - (jmax / 2.0) * T5 - (jmax * T6)) * tau7 + v1_2;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}
 
@@ -1571,13 +1478,13 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 		if (!double_decel_move && !Vi_is_positive){
 			jerk_now = - jmax + ((jmax / T11) * tau11);
 			acel_now = - (jmax * tau11) + (jmax / (2 * T11)) * pow(tau11, 2) - (jmax / 2) * (T9 + (2 * T10));
-			vel_target = - (jmax / 2.0) * pow(tau11, 2) + (jmax / (6.0 * T11)) * pow(tau11, 3) - (jmax / 2.0) * (T9 + (2 * T10)) * tau11 + v5;
+			vel_target = - (jmax / 2.0) * pow(tau11, 2) + (jmax / (6.0f * T11)) * pow(tau11, 3) - (jmax / 2.0) * (T9 + (2 * T10)) * tau11 + v5;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 
 		}else{
 			jerk_now = - jmax_rampToCero + ((jmax_rampToCero / T11) * tau11);
 			acel_now = - (jmax_rampToCero * tau11) + (jmax_rampToCero / (2 * T11)) * pow(tau11, 2) - (jmax_rampToCero / 2) * (T9 + (2 * T10));
-			vel_target = - (jmax_rampToCero / 2.0) * pow(tau11, 2) + (jmax_rampToCero / (6.0 * T11)) * pow(tau11, 3) - (jmax_rampToCero / 2.0) * (T9 + (2 * T10)) * tau11 + v5_rd;
+			vel_target = - (jmax_rampToCero / 2.0) * pow(tau11, 2) + (jmax_rampToCero / (6.0f * T11)) * pow(tau11, 3) - (jmax_rampToCero / 2.0) * (T9 + (2 * T10)) * tau11 + v5_rd;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}
 
@@ -1642,13 +1549,13 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 
 		if (!double_decel_move && !Vi_is_positive){
 			jerk_now = jmax / T13 * tau13;
-			acel_now =  (jmax / (2.0 * T13)) * pow(tau13, 2) - amax;
-			vel_target = jmax / (6.0 * T13) * pow(tau13, 3) - amax * tau13 + v3;
+			acel_now =  (jmax / (2.0f * T13)) * pow(tau13, 2) - amax;
+			vel_target = jmax / (6.0f * T13) * pow(tau13, 3) - amax * tau13 + v3;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}else{
 			jerk_now = jmax_rampToCero / T13 * tau13;
-			acel_now =  (jmax_rampToCero / (2.0 * T13)) * pow(tau13, 2) - amax_rampToCero;
-			vel_target = jmax_rampToCero / (6.0 * T13) * pow(tau13, 3) - amax_rampToCero * tau13 + v3_rd;
+			acel_now =  (jmax_rampToCero / (2.0f * T13)) * pow(tau13, 2) - amax_rampToCero;
+			vel_target = jmax_rampToCero / (6.0f * T13) * pow(tau13, 3) - amax_rampToCero * tau13 + v3_rd;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}
 
@@ -1715,12 +1622,12 @@ void S4_CurvePlanner::RuntimePlanner(float t) {
 
 		if (!double_decel_move && !Vi_is_positive){
 			jerk_now = jmax - (jmax / T15) * tau15;
-			acel_now =  (jmax * tau15) - ((jmax / (2.0 * T15)) * pow(tau15, 2)) - amax + ((jmax / 2.0) * T9) + (jmax * T10);
-			vel_target = (jmax / 2.0) * pow(tau15, 2) - (jmax / (6.0 * T15)) * pow(tau15, 3) - (amax - (jmax / 2.0) * T9 - (jmax * T10)) * tau15 + v1;
+			acel_now =  (jmax * tau15) - ((jmax / (2.0f * T15)) * pow(tau15, 2)) - amax + ((jmax / 2.0) * T9) + (jmax * T10);
+			vel_target = (jmax / 2.0) * pow(tau15, 2) - (jmax / (6.0f * T15)) * pow(tau15, 3) - (amax - (jmax / 2.0) * T9 - (jmax * T10)) * tau15 + v1;
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}else{
 			jerk_now = jmax_rampToCero - (jmax_rampToCero / T15) * tau15;
-			acel_now =  (jmax_rampToCero * tau15) - ((jmax_rampToCero / (2.0 * T15)) * pow(tau15, 2)) - amax_rampToCero + ((jmax_rampToCero / 2.0) * T9) + (jmax_rampToCero * T10);
+			acel_now =  (jmax_rampToCero * tau15) - ((jmax_rampToCero / (2.0f * T15)) * pow(tau15, 2)) - amax_rampToCero + ((jmax_rampToCero / 2.0) * T9) + (jmax_rampToCero * T10);
 			pos_target = Last_position + ((last_velocity + vel_target) / 2.0f + 0.5f * (last_acceleratio + acel_now) * deltaTime) * deltaTime;
 		}
 
