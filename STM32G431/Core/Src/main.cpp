@@ -10,10 +10,7 @@
 #include "NRF24L01P.h"
 #include "math.h"
 #include "MadgwickAHRS.h"
-#include "S4_CurvePlanner.h"
 #include <string.h>
-
-S4_CurvePlanner planner(1000);
 
 
 void SystemClock_Config(void);
@@ -34,8 +31,23 @@ void SystemClock_Config(void);
 
 // NRF buffer
 #define PAYLOADSIZE 12
-uint8_t buffer[PAYLOADSIZE];
 
+typedef struct __attribute__((packed)) {
+    uint8_t who;
+    uint8_t what;
+    uint8_t maxSpeed;          // per 0.01
+    uint8_t accelerationRatio; // per 0.01
+    uint8_t distance;          // per 2cm
+    uint8_t direction;         // 0 = forwards, 1 = backwards
+    uint8_t unused[6];         // padding or future use
+} ControlData;
+
+uint8_t buffer[PAYLOADSIZE];
+ControlData txData;
+ControlData rxData;
+
+// Debug send command
+uint8_t send;
 
 void configNRF(uint8_t chan) {
 	// NRF24L01P init
@@ -578,21 +590,159 @@ struct Movement {
 	float distance;
 	uint32_t duration;
 	float startOffset;
+	int direction;
 };
 
 struct Movement movement = {
     .start = 0,
     .running = 0,
     .startTimestamp = 0,
-    .distance = 0.2f,
     .duration = 3000000,
-    .startOffset = 0.0f
+    .startOffset = 0.0f,
+	.direction = 1
 };
 
 
 /// Timing stuff
 
 unsigned long microsPerReading, microsPrevious, microsUsed;
+
+
+
+
+
+
+
+
+
+/// Quintic Movement Stuff
+
+typedef struct {
+    float rampRatio; // Determines max acceleration used
+    float maxSpeed;
+    float totalDistance;
+
+    float rampTime;
+    float cruiseTime;
+    float totalTime;
+    float rampDistance;
+    float cruiseDistance;
+} PositionProfile;
+
+PositionProfile p = {
+    .rampRatio = 0.1f,
+    .maxSpeed = 0.1f,
+    .totalDistance = 0.2f,
+    .rampTime = 0.0f,
+    .cruiseTime = 0.0f,
+    .totalTime = 0.0f,
+    .rampDistance = 0.0f,
+    .cruiseDistance = 0.0f
+};
+
+
+
+void distanceSpeedRampRatioToProfileTimes(PositionProfile &p){
+    // Calculate ramp up / ramp down time
+    p.rampTime = p.maxSpeed / p.rampRatio;
+
+    // Calculate total distance spent ramping up and down
+    p.rampDistance = p.rampTime * p.maxSpeed;
+
+    // Check if we can accelerate fast enough to reach max Speed
+    if (p.rampDistance <= p.totalDistance){
+
+        // We can! Calculate distance to spend cruising
+        p.cruiseDistance = p.totalDistance - p.rampDistance;
+
+        // Calculate time spent cruising
+        p.cruiseTime = p.cruiseDistance / p.maxSpeed;
+    }
+
+    // If we can't reach max speed
+    else {
+        // We're fucked. Gotta recalculate the trajectory
+
+        // The ramp ratio determines acceleration. That is fixed. Max speed becomes irrelevant if we can't reach that.
+        // With a ramp ratio of 1 we can reach 1 speed in 1 time, and we'd move 0.5 distance. In total we'd move 1 distance in 2 time.
+        // So for a ramp ratio of 1, the ramp time is 1 if we need to reach 1 distance.
+        // For 4 distance, with a ramp ratio of 1, we'd reach 2 speed in 2 time. Moving 2 distance (0.5 * 2 * 2). Ramp time of 2.
+        // With a ramp ratio of 2, we'd reach 2 speed in 1 time. Moving 1 distance in each half. Total distance of 2. Ramp time of 1.
+
+        p.rampTime = sqrtf(p.totalDistance / p.rampRatio);
+        p.maxSpeed = sqrtf(p.totalDistance * p.rampRatio);
+
+        p.cruiseDistance = 0;
+        p.cruiseTime = 0;
+    }
+
+    p.totalTime = 2 * p.rampTime + p.cruiseTime;
+}
+
+
+
+// Quintic curve function [0-1] in [0-1] out
+float quinticCurve(float x) {
+    return 10 * pow(x, 3) - 15 * pow(x, 4) + 6 * pow(x, 5);
+}
+
+// Quintic integral function [0-1] in [0-0.5] out
+float quinticIntegral(float x) {
+    return pow(x, 6) - 3 * pow(x, 5) + 2.5 * pow(x, 4);
+}
+
+// Quantic Curve Based Speed Profile
+float quinticSpeedProfile(float currentTime, float rampTime, float cruiseTime, float maxSpeed) {
+    // Limit bottom
+    if (currentTime < 0) return 0;
+
+    // Acceleration
+    if (currentTime < rampTime) {
+        return maxSpeed * quinticCurve(currentTime / rampTime);
+    }
+
+    // Constant velocity
+    else if (currentTime < rampTime + cruiseTime) {
+        return maxSpeed;
+    }
+
+    // Deceleration
+    else if (currentTime < 2 * rampTime + cruiseTime) {
+        return maxSpeed * (1 - quinticCurve((currentTime - rampTime - cruiseTime) / rampTime));
+    }
+
+    // Limit top
+    else {
+        return 0;
+    }
+}
+
+// Quantic Curve Based Speed Profile Position Integral
+float quinticPositionProfile(float currentTime, float rampTime, float cruiseTime, float maxSpeed) {
+
+    // Limit bottom
+    if (currentTime < 0) return 0;
+
+    // Acceleration
+    if (currentTime < rampTime) {
+        return quinticIntegral(currentTime / rampTime) * rampTime * maxSpeed;
+    }
+
+    // Constant velocity
+    else if (currentTime < rampTime + cruiseTime) {
+        return 0.5 * maxSpeed * rampTime + (currentTime - rampTime) * maxSpeed;
+    }
+
+    // Deceleration
+    else if (currentTime < 2 * rampTime + cruiseTime) {
+        return maxSpeed * rampTime + cruiseTime * maxSpeed - (quinticIntegral((2 * rampTime + cruiseTime - currentTime) / rampTime) * rampTime * maxSpeed);
+    }
+
+    // Limit top
+    else {
+        return maxSpeed * rampTime + cruiseTime * maxSpeed;
+    }
+}
 
 
 
@@ -835,51 +985,29 @@ int main(void) {
 
 			if (movement.start){
 				movement.start = 0;
-//				movement.running = 1;
-//				movement.startTimestamp = TIM2->CNT;
-//				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
+				movement.running = 1;
+				movement.startTimestamp = TIM2->CNT;
+				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
 
-				planner.Initiate_Move(movement.distance);
+				p.totalDistance;
 
+				phaseVoltage = 5;
+
+				distanceSpeedRampRatioToProfileTimes(p);
 			}
 
 
+			if (movement.running) {
+				float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
 
-//			if (movement.running) {
-//				uint32_t runTime = TIM2->CNT - movement.startTimestamp;
-//
-//				electricalAngle = (movement.startOffset + get_position(runTime, movement.duration, movement.distance)) * METERS2RAD * POLE_PAIRS;
-//
-//				if (runTime >= movement.duration) {
-//					movement.running = 0;
-//					movement.distance = -movement.distance;
-//				}
-//			}
+				electricalAngle = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed)) * METERS2RAD * POLE_PAIRS;
 
-
-			// see if we are in a move or not
-			if (planner.isTrajectoryExecuting){
-				// we are in a move, let's calc the next position
-				float timeSinceStartingTrajectoryInSeconds = (TIM2->CNT - planner.plannerStartingMovementTimeStamp) / 1000000.0f;
-				planner.RuntimePlanner(timeSinceStartingTrajectoryInSeconds);
-				electricalAngle = planner.pos_target;
-
-
-				// see if we are done with our move
-				if (timeSinceStartingTrajectoryInSeconds >= planner.Tf){
-					// we are done with move
-
-					planner.isTrajectoryExecuting = false;
+				if (runTime >= p.totalTime + 1.0f) {
+					movement.running = 0;
+					movement.direction = -movement.direction;
+					phaseVoltage = 2;
 				}
 			}
-
-
-
-
-
-
-
-
 
 
 			setPhaseVoltage(phaseVoltage, electricalAngle);
@@ -887,32 +1015,55 @@ int main(void) {
 
 
 
+			if (NRF_DataReady()) {
+			    NRF_GetData(buffer);
+			    memcpy(&rxData, buffer, sizeof(ControlData));  // Copy buffer to struct
+
+			    // Check if it's a message 1 for everyone
+			    if (rxData.who == 0 && rxData.what == 1 && !movement.running){
+
+			    	// Copy data
+			    	p.maxSpeed = rxData.maxSpeed * 0.01f;
+			    	p.rampRatio = rxData.accelerationRatio * 0.01f;
+			    	p.totalDistance = rxData.distance / 50.0f;
+			    	movement.direction = rxData.direction ? 1 : -1;
+
+			    	// Raise movement start flag
+			    	movement.start = 1;
+			    }
+			}
 
 
+			// Debug send command
+			if (send == 1) {
+			    send = 0;
 
+			    txData.who = 0;
+			    txData.what = 1;
+			    txData.maxSpeed = p.maxSpeed * 100.0f;          // * 0.01f
+			    txData.accelerationRatio = p.rampRatio * 100.0f; // * 0.01f
+			    txData.distance = p.totalDistance * 50.0f;          // * 2.0f;
+			    txData.direction = movement.direction == 1 ? 1 : 0;
 
+			    memcpy(buffer, &txData, sizeof(ControlData));  // Copy struct to buffer
 
-
-			//		if (NRF_DataReady()) {
-			//			NRF_GetData(buffer);
-			//
-			//			pid.target = (float)buffer[0] * 180 / 255.0f - 90.0f;
-			//			BAT_VoltageToRGB(BAT.voltage);
-			//		}
+			    NRF_Send(buffer);
+			    while (NRF_IsSending());
+			}
 
 
 //			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
-			myData.a = planner.pos_target;
-			myData.b = planner.vel_target;//est_vel;
-			myData.c = planner.acel_now;//est_acc;
-			myData.d = planner.jerk_now;
+			myData.a = electricalAngle;
+			myData.b = 0;//planner.vel_target;//est_vel;
+			myData.c = 0;//planner.acel_now;//est_acc;
+			myData.d = 0;//planner.jerk_now;
 			myData.e = 0;
 
 
 
-			if (planner.isTrajectoryExecuting) sendFloats(&myData);
+			if (movement.running) sendFloats(&myData);
 
 			//		NRF_Send(buffer);
 			//		while (NRF_IsSending());
