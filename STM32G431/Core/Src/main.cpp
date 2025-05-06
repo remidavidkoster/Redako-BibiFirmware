@@ -10,6 +10,7 @@
 #include "NRF24L01P.h"
 #include "math.h"
 #include "MadgwickAHRS.h"
+#include "S4_CurvePlanner.h"
 #include <string.h>
 
 void SystemClock_Config(void);
@@ -20,8 +21,9 @@ void SystemClock_Config(void);
 #define ABS(x) ((x) < 0 ? -(x) : (x))
 
 #define POLE_PAIRS 7
+#define _1_DIV_POLE_PAIRS 0.14285714285714285714f
 
-
+#define DIABOLO_CIRCUMFERENCE 0.408407044966673121f
 
 
 
@@ -53,6 +55,13 @@ void configNRF(uint8_t chan) {
 #define _SQRT3_2 0.86602540378f
 #define _1_OVER_2PI 0.15915494309f  // 1 / (2 * PI)
 #define _3PI_2 4.71238898038f
+#define RAD2DEG 57.29577951308232087680f
+#define DEG2RAD 0.01745329251994329577f
+#define PI 3.141592653589793f
+
+#define METERS2RAD (TWO_PI / DIABOLO_CIRCUMFERENCE)
+#define RAD2METERS (DIABOLO_CIRCUMFERENCE / TWO_PI)
+
 
 
 float sinTable[TABLE_SIZE];
@@ -105,7 +114,7 @@ int upperPWMLimit = 8489;
 int motorNumber = 0;
 
 // Default open loop phase voltage
-float phaseVoltage = 5;
+float phaseVoltage = 2;
 
 // Current phase voltages Ua,Ub and Uc set to motor [V]
 float Ua, Ub, Uc;
@@ -305,7 +314,10 @@ PIDController pid = {
 
 float speed;
 float electricalAngle;
-
+float motorAngleFull;
+float diaboloAngleFull;
+float diaboloDistance;
+float error;
 
 
 
@@ -314,7 +326,17 @@ float electricalAngle;
 
 Madgwick filter;
 
-volatile float madwickAngleFull;
+#define SAMPLE_FREQUENCY 1000
+
+typedef struct {
+    volatile float angleFull;
+    float anglePrev;
+    float angleDelta;
+    int turns;
+    float currentAngle;
+} MadgwickStruct;
+
+MadgwickStruct madgwick;
 
 
 
@@ -366,71 +388,7 @@ void sendFloats(FloatStruct *data) {
 
 
 
-/// Encoder stuff
-
-uint8_t txData[6];
-uint8_t rxData[6];
-uint32_t lastRawAngle = 0;
-
-float angle_prev=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
-float angleFull=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
-
-float zero_electric_angle;
-
-uint32_t angle_prev_ts=0; // timestamp of last call to getAngle, used for velocity
-float vel_angle_prev=0.0f; // angle at last call to getVelocity, used for velocity
-uint32_t vel_angle_prev_ts=0; // last velocity calculation timestamp
-int32_t full_rotations=0; // full rotation tracking
-int32_t vel_full_rotations=0; // previous full rotation value for velocity calculation
-
-const int32_t sensor_direction = 1;
-
-
-void ENC_Update(){
-	//		HAL_SPI_DeInit(&hspi2);
-	//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
-	//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
-	//		HAL_SPI_Init(&hspi2);
-
-	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
-
-	txData[0] = 0b1010 << 4;
-	txData[1] = 0x03;
-
-	HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
-
-	lastRawAngle = 0;
-
-	// Extract bits from rawData1 and rawData2
-	lastRawAngle |= ((uint32_t)(rxData[0 + 2]) << 13);  // Upper 8 bits (ANGLE[20:13])
-	lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
-	lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
-
-	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
-
-	float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
-	//	    angle_prev_ts = TIM6->CNT;
-	float d_angle = val - angle_prev;
-	// if overflow happened track it as full rotation
-	if(abs(d_angle) > (0.8f*TWO_PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
-	angle_prev = val;
-
-	angleFull = (float)full_rotations * TWO_PI + angle_prev;
-
-	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
-	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
-}
-
-
-
-
-
-
-
-
-
-
-
+/// Charge stuff
 
 void CHG_RunLogic(){
 
@@ -443,10 +401,6 @@ void CHG_RunLogic(){
 	// Charge enable logic
 	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)(CHG.plugged && CHG.enabled));
 }
-
-
-
-
 
 
 
@@ -475,7 +429,7 @@ float calculate_standard_deviation(float *data, int num_samples) {
 }
 
 
-#define STABILITY_THRESHOLD 0.002f  // Threshold for accelerometer standard deviation
+#define STABILITY_THRESHOLD 0.0025f  // Threshold for accelerometer standard deviation
 #define NUM_SAMPLES 100          // Number of samples to collect for both accelerometer and gyro
 #define GRAVITY 9.81f             // Gravity constant in m/s^2
 
@@ -547,12 +501,18 @@ void waitForStableGetGyroOffsets(){
 
 
 
+
+
+
+
+
+
 /// Main 10kHz pid loop
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if (htim->Instance == TIM6) {
 
-		pid.error = madwickAngleFull - pid.target;
+		pid.error = madgwick.angleFull - pid.target;
 
 		if (pid.target != pid.lastTarget){
 			pid.prev_error = pid.error;
@@ -563,12 +523,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 		// Derivative with low-pass filter
 		pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
 
-		pid.integral += pid.error * pid.i;
+		//pid.integral += pid.error * pid.i;
 
-		pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
+		//pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
 
 		// PID output
-		pid.output = pid.p * pid.error + pid.derivative + pid.integral;
+		pid.output = pid.p * pid.error + pid.derivative;// + pid.integral;
 
 		pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
 
@@ -582,12 +542,49 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
 		electricalAngle += speed;
 
+		motorAngleFull = electricalAngle / POLE_PAIRS * RAD2DEG;
+
 		setPhaseVoltage(phaseVoltage, electricalAngle);
 	}
 }
 
 
 
+
+// Get position at time t during cosine motion profile
+// Inputs:
+//   t        - time since start [s]
+//   duration - total movement time [s]
+//   distance - total distance to travel [m]
+// Output:
+//   returns position traveled [m] at time t
+float get_position(uint32_t t, uint32_t duration, float distance) {
+    if (t <= 0) return 0.0f;
+    if (t >= duration) return distance;
+
+    float omega = TWO_PI / duration;
+    float pos = (distance / duration) * (t - (sin(omega * t) / omega));
+    return pos;
+}
+
+
+struct Movement {
+	uint32_t start;
+	uint32_t running;
+	uint32_t startTimestamp;
+	float distance;
+	uint32_t duration;
+	float startOffset;
+};
+
+struct Movement movement = {
+    .start = 0,
+    .running = 0,
+    .startTimestamp = 0,
+    .distance = 0.2f,
+    .duration = 3000000,
+    .startOffset = 0.0f
+};
 
 
 /// Timing stuff
@@ -733,14 +730,7 @@ int main(void) {
 
 
 
-
 	configNRF(10);
-
-
-
-
-
-
 
 
 
@@ -749,20 +739,18 @@ int main(void) {
 	waitForStableGetGyroOffsets();
 
 
-	setPhaseVoltage(5.65, _3PI_2);
-	HAL_Delay(4000);
-	ENC_Update();
-	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
-	setPhaseVoltage(0, _3PI_2);
+//	setPhaseVoltage(5.65, _3PI_2);
+//	HAL_Delay(4000);
+//	ENC_Update();
+//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
+//	setPhaseVoltage(0, _3PI_2);
 
 
 
 
-	// Start main motor interrupt
-	HAL_TIM_Base_Start_IT(&htim6);
 
 
-#define SAMPLE_FREQUENCY 1000
+
 
 
 	// Begin Madwick filter at 1000hz
@@ -772,45 +760,10 @@ int main(void) {
 	microsPerReading = 1000000 / SAMPLE_FREQUENCY;
 	microsPrevious = TIM2->CNT;
 
-	//	while (1){
-	//		// Read battery Voltage
-	//		ADC.valueVRefInt = ADC1->DR;
-	//		ADC.valueBattery = ADC2->DR;
-	//		BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
-	//
-	//
-	//
-	//		accelb = icm42670_read_accel(&imuB);
-	//		angleb = atan2f(accelb.y, -accelb.x) * 180.0f / (float)M_PI;
-	//
-	//
-	//		angleb = LIMIT(-45, angleb, 45);
-	//
-	//		buffer[0] = (angleb + 45.0f) * 255.0f / 90.0f;
-	//
-	//		NRF_Send(buffer);
-	//		while (NRF_IsSending());
-	//
-	//
-	//		BAT_VoltageToRGB(BAT.voltage);
-	//		HAL_Delay(5);
-	//		RGB_Set(0, 0, 0);
-	//		HAL_Delay(45);
-	//
-	//	}
+	// Start main motor interrupt
+//	HAL_TIM_Base_Start_IT(&htim6);
 
-
-
-
-	/* USER CODE END 2 */
-
-	/* Infinite loop */
-	/* USER CODE BEGIN WHILE */
 	while (1)  {
-
-
-
-
 
 		if (TIM2->CNT - microsPrevious >= microsPerReading) {
 
@@ -820,11 +773,8 @@ int main(void) {
 			// Display Battery on led
 			BAT_VoltageToRGB(BAT.voltage);
 
-
-
 			// Run charge management logic
 			CHG_RunLogic();
-
 
 			// Low battery shut down
 			if (TIM2->CNT > 1000000){
@@ -852,30 +802,63 @@ int main(void) {
 			float pitch = filter.getPitch();
 			float heading = filter.getYaw();
 
-			float madwickAngle = (roll < 0) ? pitch - 90 : 90 - pitch;
-			static float madwickAnglePrev;
-			static int madwickTurns;
+
 
 
 
 
 			// Assuming imu_data.angle is in [0, 360)
-			float current_angleMad = madwickAngle;
-			float previous_angleMad = madwickAnglePrev;
-
-			float delta_angleMad = current_angleMad - previous_angleMad;
+			madgwick.currentAngle = (roll < 0) ? pitch - 90.0f : 90.0f - pitch;
+			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
+			madgwick.anglePrev = madgwick.currentAngle;
 
 			// Detect wrap-around and update turn counter
-			if (delta_angleMad > 180.0f) {
-				madwickTurns--; // Rotated backwards across 0°
-			} else if (delta_angleMad < -180.0f) {
-				madwickTurns++; // Rotated forward across 360°
-			}
-
-			madwickAnglePrev = current_angleMad;
+			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
+			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
 
 			// Compute total angle
-			madwickAngleFull = current_angleMad + 360.0f * madwickTurns;
+			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
+
+
+
+			motorAngleFull = electricalAngle / POLE_PAIRS * RAD2DEG;
+
+			// Compute the angle the diabolo has made from its startup position
+			diaboloAngleFull = motorAngleFull + madgwick.angleFull;
+
+			diaboloDistance = diaboloAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE;
+
+			error = diaboloDistance - (motorAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE);
+
+			if (movement.start){
+				movement.start = 0;
+				movement.running = 1;
+				movement.startTimestamp = TIM2->CNT;
+				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
+			}
+
+
+
+			if (movement.running) {
+				uint32_t runTime = TIM2->CNT - movement.startTimestamp;
+
+				electricalAngle = (movement.startOffset + get_position(runTime, movement.duration, movement.distance)) * METERS2RAD * POLE_PAIRS;
+
+				if (runTime >= movement.duration) {
+					movement.running = 0;
+					movement.distance = -movement.distance;
+				}
+			}
+
+
+
+
+			setPhaseVoltage(phaseVoltage, electricalAngle);
+
+
+
+
+
 
 
 
@@ -889,33 +872,13 @@ int main(void) {
 			//		}
 
 
-
-
-
-
-
-
-
-			//ENC_Update();
-
-
-			//electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
-
-
-
-
 //			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
-
-
-
-
-
-			myData.a = roll;
-			myData.b = pitch;
-			myData.c = heading;
-			myData.d = madwickAngleFull;
+			myData.a = diaboloAngleFull;
+			myData.b = 0;//est_vel;
+			myData.c = 0;//est_acc;
+			myData.d = madgwick.angleFull;
 			myData.e = 0;
 
 
@@ -930,25 +893,15 @@ int main(void) {
 			//		BAT_VoltageToRGB(BAT.voltage);
 			//		HAL_Delay(400);
 
-			microsUsed = TIM2->CNT - microsPrevious;
+			microsUsed = TIM2->CNT - microsPrevious - microsPerReading;
 
 			microsPrevious = microsPrevious + microsPerReading;
 		}
-
-
-		/* USER CODE END WHILE */
-
-		/* USER CODE BEGIN 3 */
 	}
-	/* USER CODE END 3 */
 }
 
-/**
- * @brief System Clock Configuration
- * @retval None
- */
-void SystemClock_Config(void)
-{
+
+void SystemClock_Config(void){
 	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
 	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -990,16 +943,7 @@ void SystemClock_Config(void)
 	}
 }
 
-/* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
-
-/**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
-void Error_Handler(void)
-{
+void Error_Handler(void){
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
