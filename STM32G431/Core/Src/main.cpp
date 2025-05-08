@@ -30,33 +30,19 @@ void SystemClock_Config(void);
 /// Radio Stuff
 
 // NRF buffer
-#define PAYLOADSIZE 12
+#define MIN_PAYLOAD 4
+#define MAX_PAYLOAD 12
+#define MAX_CHANNEL 125
 
-typedef struct __attribute__((packed)) {
-    uint8_t who;
-    uint8_t what;
-    uint8_t maxSpeed;          // per 0.01
-    uint8_t accelerationRatio; // per 0.01
-    uint8_t distance;          // per 2cm
-    uint8_t direction;         // 0 = forwards, 1 = backwards
-    uint8_t unused[6];         // padding or future use
-} ControlData;
+uint8_t buffer[MAX_PAYLOAD];
 
-uint8_t buffer[PAYLOADSIZE];
-ControlData txData;
-ControlData rxData;
-
-// Debug send command
-uint8_t send;
-
-void configNRF(uint8_t chan) {
-	// NRF24L01P init
-	NRF_Init();
-	setRADDR((uint8_t *)"BIBIx");
-	setTADDR((uint8_t *)"BIBIx");
-	payload = PAYLOADSIZE;
-	channel = chan;
-	NRF_Config();
+void configNRF(uint8_t chan, uint8_t psize) {
+    NRF_Init();
+    setRADDR((uint8_t *)"TCMfx");   // RX address
+    setTADDR((uint8_t *)"TCMfx");   // Not needed, but initialized
+    payload = psize;
+    channel = chan;
+    NRF_Config();
 }
 
 
@@ -748,6 +734,37 @@ float quinticPositionProfile(float currentTime, float rampTime, float cruiseTime
 
 
 
+uint8_t ch;
+uint8_t size;
+
+void sniffNRF() {
+    for (ch = 0; ch <= MAX_CHANNEL; ch++) {
+        for (size = MIN_PAYLOAD; size <= MAX_PAYLOAD; size++) {
+            configNRF(101, 4);
+            //printf("Scanning: CH=%u, PAYLOAD=%u\r\n", ch, size);
+
+            uint32_t start = HAL_GetTick();
+            while ((HAL_GetTick() - start) < 1000) {  // 1 second per combo
+                if (NRF_DataReady()) {
+                    NRF_GetData(buffer);
+                    //printf("Packet on CH %u [%u bytes]: ", ch, size);
+                    for (uint8_t i = 0; i < size; i++) {
+                        asm("nop");//printf("%02X ", buffer[i]);
+                    }
+                    //printf("\r\n");
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
 // Main loop
 int main(void) {
 
@@ -772,311 +789,12 @@ int main(void) {
 
 
 
-	// Set VREF to 2.5V
-	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
+//	configNRF(10);
 
-
-
-	// Start microsecond timer, overflows after 71 minutes.
-	HAL_TIM_Base_Start(&htim2);
-
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-
-
-
-
-
-
-
-
-
-
-
-	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
-	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
-
-
-	ADC1->CR |= ADC_CR_ADCAL;
-	while (ADC1->CR & ADC_CR_ADCAL);  // Wait until calibration is done
-
-	ADC2->CR |= ADC_CR_ADCAL;
-	while (ADC2->CR & ADC_CR_ADCAL);  // Wait until calibration is done
-
-	HAL_ADC_Start(&hadc1);
-	HAL_ADC_Start(&hadc2);
-
-
-
-	ADC.vrefintCal = *VREFINT_CAL_ADDR;
-	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
-
-
-	// Charge power only, no button pressed
-	while (!HAL_GPIO_ReadPin(BUT1_GPIO_Port, BUT1_Pin)){
-
-		// Update global battery Voltage
-		BAT_Update();
-
-		// Display Battery on led
-		BAT_VoltageToRGB(BAT.voltage);
-
-		// Run charge management logic
-		CHG_RunLogic();
-	}
-
-
-
-
-
-	// Keep itself on
-	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
-
-
-	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
-	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
-
-
-
-	//ICM42670 Init
-	if(icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2) != HAL_OK){
-		failed = 1;
-	}
-
-	// Setup rate & scale
-	icm42670_mclk_on(&imu);
-	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
-
-//	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
-//
-//	icm42670_write(&imu, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
-
-	// Initialize sine lookup table
-	initSinTable();
-
-
-
-
-	/*
-	000: Low pass filter bypassed
-	001: 180 Hz
-	010: 121 Hz
-	011: 73 Hz
-	100: 53 Hz
-	101: 34 Hz
-	110: 25 Hz
-	111: 16 Hz
-	 */
-
-
-//	const uint8_t ACCEL_UI_FILT_BW_16HZ = 0b111;
-//	const uint8_t ACCEL_UI_FILT_BW_34HZ = 0b101;
-//
-//	icm42670_write(&imu, ICM42670_REG_ACCEL_CONFIG1, &ACCEL_UI_FILT_BW_34HZ, 1);
-
-
-
-
-	configNRF(10);
-
-
-
-
-
-	waitForStableGetGyroOffsets();
-
-
-//	setPhaseVoltage(5.65, _3PI_2);
-//	HAL_Delay(4000);
-//	ENC_Update();
-//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
-//	setPhaseVoltage(0, _3PI_2);
-
-
-
-
-
-
-
-
-
-	// Begin Madwick filter at 1000hz
-	filter.begin(SAMPLE_FREQUENCY);
-
-	// initialize variables to pace updates to correct rate
-	microsPerReading = 1000000 / SAMPLE_FREQUENCY;
-	microsPrevious = TIM2->CNT;
-
-	// Start main motor interrupt
-//	HAL_TIM_Base_Start_IT(&htim6);
 
 	while (1)  {
 
-		if (TIM2->CNT - microsPrevious >= microsPerReading) {
-
-			// Update global battery Voltage
-			BAT_Update();
-
-			// Display Battery on led
-			BAT_VoltageToRGB(BAT.voltage);
-
-			// Run charge management logic
-			CHG_RunLogic();
-
-			// Low battery shut down
-			if (TIM2->CNT > 1000000){
-				if (BAT.voltage < 3.0f) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-			}
-
-			// Button shut down
-			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-
-
-
-
-			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
-			imu_data.accel = icm42670_read_accel(&imu);
-			imu_data.gyro = icm42670_read_gyro(&imu);
-
-			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
-			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
-			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
-
-			// update the filter, which computes orientation
-			filter.updateIMU(imu_data.gyroZerod.x, imu_data.gyroZerod.y, imu_data.gyroZerod.z, imu_data.accel.x, imu_data.accel.y, imu_data.accel.z);
-
-			float roll = filter.getRoll();
-			float pitch = filter.getPitch();
-			float heading = filter.getYaw();
-
-
-
-
-
-
-			// Assuming imu_data.angle is in [0, 360)
-			madgwick.currentAngle = (roll < 0) ? pitch - 90.0f : 90.0f - pitch;
-			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
-			madgwick.anglePrev = madgwick.currentAngle;
-
-			// Detect wrap-around and update turn counter
-			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
-			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
-
-			// Compute total angle
-			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
-
-
-
-			motorAngleFull = electricalAngle / POLE_PAIRS * RAD2DEG;
-
-			// Compute the angle the diabolo has made from its startup position
-			diaboloAngleFull = motorAngleFull + madgwick.angleFull;
-
-			diaboloDistance = diaboloAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE;
-
-			error = diaboloDistance - (motorAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE);
-
-			if (movement.start){
-				movement.start = 0;
-				movement.running = 1;
-				movement.startTimestamp = TIM2->CNT;
-				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
-
-				p.totalDistance;
-
-				phaseVoltage = 5;
-
-				distanceSpeedRampRatioToProfileTimes(p);
-			}
-
-
-			if (movement.running) {
-				float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
-
-				electricalAngle = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed)) * METERS2RAD * POLE_PAIRS;
-
-				if (runTime >= p.totalTime + 1.0f) {
-					movement.running = 0;
-					movement.direction = -movement.direction;
-					phaseVoltage = 2;
-				}
-			}
-
-
-			setPhaseVoltage(phaseVoltage, electricalAngle);
-
-
-
-
-			if (NRF_DataReady()) {
-			    NRF_GetData(buffer);
-			    memcpy(&rxData, buffer, sizeof(ControlData));  // Copy buffer to struct
-
-			    // Check if it's a message 1 for everyone
-			    if (rxData.who == 0 && rxData.what == 1 && !movement.running){
-
-			    	// Copy data
-			    	p.maxSpeed = rxData.maxSpeed * 0.01f;
-			    	p.rampRatio = rxData.accelerationRatio * 0.01f;
-			    	p.totalDistance = rxData.distance / 50.0f;
-			    	movement.direction = rxData.direction ? 1 : -1;
-
-			    	// Raise movement start flag
-			    	movement.start = 1;
-			    }
-			}
-
-
-			// Debug send command
-			if (send == 1) {
-			    send = 0;
-
-			    txData.who = 0;
-			    txData.what = 1;
-			    txData.maxSpeed = p.maxSpeed * 100.0f;          // * 0.01f
-			    txData.accelerationRatio = p.rampRatio * 100.0f; // * 0.01f
-			    txData.distance = p.totalDistance * 50.0f;          // * 2.0f;
-			    txData.direction = movement.direction == 1 ? 1 : 0;
-
-			    memcpy(buffer, &txData, sizeof(ControlData));  // Copy struct to buffer
-
-			    NRF_Send(buffer);
-			    while (NRF_IsSending());
-			}
-
-
-//			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
-
-
-			myData.a = electricalAngle;
-			myData.b = 0;//planner.vel_target;//est_vel;
-			myData.c = 0;//planner.acel_now;//est_acc;
-			myData.d = 0;//planner.jerk_now;
-			myData.e = 0;
-
-
-
-			if (movement.running) sendFloats(&myData);
-
-			//		NRF_Send(buffer);
-			//		while (NRF_IsSending());
-			//
-			//		RGB_Set(0, 0, 0);
-			//		HAL_Delay(100);
-			//		BAT_VoltageToRGB(BAT.voltage);
-			//		HAL_Delay(400);
-
-			microsUsed = TIM2->CNT - microsPrevious - microsPerReading;
-
-			microsPrevious = microsPrevious + microsPerReading;
-		}
+		sniffNRF();
 	}
 }
 
