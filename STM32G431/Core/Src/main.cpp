@@ -13,6 +13,11 @@
 #include <string.h>
 
 
+// Identification number of this bibi
+#define BIBI_NUMBER 4
+
+
+
 void SystemClock_Config(void);
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -30,21 +35,33 @@ void SystemClock_Config(void);
 /// Radio Stuff
 
 // NRF buffer
-#define PAYLOADSIZE 12
+#define PAYLOADSIZE 4
 
 typedef struct __attribute__((packed)) {
-    uint8_t who;
-    uint8_t what;
-    uint8_t maxSpeed;          // per 0.01
-    uint8_t accelerationRatio; // per 0.01
-    uint8_t distance;          // per 2cm
-    uint8_t direction;         // 0 = forwards, 1 = backwards
-    uint8_t unused[6];         // padding or future use
+	uint8_t what;
+	uint8_t who;
+	uint8_t maxSpeed;          // per 0.01
+	uint8_t accelerationRatio; // per 0.01
+
 } ControlData;
 
 uint8_t buffer[PAYLOADSIZE];
 ControlData txData;
 ControlData rxData;
+
+#define CONTROL_BIBI 10
+#define START_CUE 14
+
+#define MODE_TEST 150
+#define MODE_FIRE 200
+
+#define UNDEFINED 0;
+#define BIBI_CONTROLLED 1
+#define CUE_CONTROLLED 2
+#define CONTROLLING_BIBI 3
+
+uint8_t BIBI_Mode;
+
 
 // Debug send command
 uint8_t send;
@@ -52,14 +69,15 @@ uint8_t send;
 void configNRF(uint8_t chan) {
 	// NRF24L01P init
 	NRF_Init();
-	setRADDR((uint8_t *)"BIBIx");
-	setTADDR((uint8_t *)"BIBIx");
+	setRADDR((uint8_t *)"TCMfx");
+	setTADDR((uint8_t *)"TCMfx");
 	payload = PAYLOADSIZE;
 	channel = chan;
 	NRF_Config();
 }
 
-
+uint32_t NRF_ReceiveTimestamp;
+uint32_t NRF_ReceiveInterval;
 
 
 
@@ -129,7 +147,7 @@ int upperPWMLimit = 8489;
 int motorNumber = 0;
 
 // Default open loop phase voltage
-float phaseVoltage = 2;
+float phaseVoltage = 0;
 
 // Current phase voltages Ua,Ub and Uc set to motor [V]
 float Ua, Ub, Uc;
@@ -209,6 +227,11 @@ void RGB_Set(float r, float g, float b){
 
 void BAT_VoltageToRGB(float voltage) {
 	float r = 0.0f, g = 0.0f, b = 0.0f;
+
+	if (voltage == 0) {
+		RGB_Set(r, g, b);
+		return;
+	}
 
 	// Clamp voltage between min and max
 	if (voltage < VBAT_MIN_VOLTAGE) voltage = VBAT_MIN_VOLTAGE;
@@ -299,7 +322,6 @@ uint8_t failed;
 
 typedef struct {
 	float p;
-	float i;
 	float d;
 
 	float error;
@@ -315,26 +337,31 @@ typedef struct {
 
 	float target;
 	float lastTarget;
+
+	float on;
 } PIDController;
 
 
-PIDController pid = {
-		.p = 2.99999989e-008f,
-		.i = 0.0f,
-		.d = 9.99999975e-005f,
+volatile PIDController pid = {
+		.p = 0.000003f,
+		.d = 0.01f,
 		.alpha = 0.001f,  // Set this based on how much filtering you want
-		.limit = 0.005f,
-		.target = 0.0f
+		.limit = 2.0f,
+		.target = 0.0f,
 };
 
-float speed;
+volatile float speed;
 float electricalAngle;
 float motorAngleFull;
 float diaboloAngleFull;
-float diaboloDistance;
-float error;
+float diaboloPosition;
+float lastDiaboloPosition;
+volatile float diaboloSpeed;
+float lastDiaboloSpeed;
+float diaboloAcceleration;
 
-
+float SPEED_ALPHA = 0.01f;
+float ACCEL_ALPHA = 0.005f;
 
 
 /// Madwick Stuff
@@ -344,14 +371,14 @@ Madgwick filter;
 #define SAMPLE_FREQUENCY 1000
 
 typedef struct {
-    volatile float angleFull;
-    float anglePrev;
-    float angleDelta;
-    int turns;
-    float currentAngle;
+	volatile float angleFull;
+	float anglePrev;
+	float angleDelta;
+	int turns;
+	float currentAngle;
 } MadgwickStruct;
 
-MadgwickStruct madgwick;
+volatile MadgwickStruct madgwick;
 
 
 
@@ -427,20 +454,20 @@ float gyro_offsets[3] = {0.0, 0.0, 0.0}; // To store the gyro offsets
 
 // Function to calculate the standard deviation of a given array
 float calculate_standard_deviation(float *data, int num_samples) {
-    float sum = 0.0;
-    float mean, stddev = 0.0;
+	float sum = 0.0;
+	float mean, stddev = 0.0;
 
-    // Calculate the mean
-    for (int i = 0; i < num_samples; i++) {
-        sum += data[i];
-    }
-    mean = sum / num_samples;
+	// Calculate the mean
+	for (int i = 0; i < num_samples; i++) {
+		sum += data[i];
+	}
+	mean = sum / num_samples;
 
-    // Calculate the standard deviation
-    for (int i = 0; i < num_samples; i++) {
-        stddev += pow(data[i] - mean, 2);
-    }
-    return sqrt(stddev / num_samples);
+	// Calculate the standard deviation
+	for (int i = 0; i < num_samples; i++) {
+		stddev += pow(data[i] - mean, 2);
+	}
+	return sqrt(stddev / num_samples);
 }
 
 
@@ -455,60 +482,66 @@ float accel_z_stddev;
 
 void waitForStableGetGyroOffsets(){
 	while (1) {
-	    // Arrays to store accelerometer and gyro samples
-	    float accel_x_samples[NUM_SAMPLES] = {0};
-	    float accel_y_samples[NUM_SAMPLES] = {0};
-	    float accel_z_samples[NUM_SAMPLES] = {0};
-	    float gyro_x_samples[NUM_SAMPLES] = {0};
-	    float gyro_y_samples[NUM_SAMPLES] = {0};
-	    float gyro_z_samples[NUM_SAMPLES] = {0};
+		// Arrays to store accelerometer and gyro samples
+		float accel_x_samples[NUM_SAMPLES] = {0};
+		float accel_y_samples[NUM_SAMPLES] = {0};
+		float accel_z_samples[NUM_SAMPLES] = {0};
+		float gyro_x_samples[NUM_SAMPLES] = {0};
+		float gyro_y_samples[NUM_SAMPLES] = {0};
+		float gyro_z_samples[NUM_SAMPLES] = {0};
 
-	    // Collect NUM_SAMPLES samples of accelerometer and gyro data
-	    for (int i = 0; i < NUM_SAMPLES; i++) {
-	        imu_data.accel = icm42670_read_accel(&imu); // Replace with actual accel read function
-	        imu_data.gyro = icm42670_read_gyro(&imu);   // Replace with actual gyro read function
+		// Collect NUM_SAMPLES samples of accelerometer and gyro data
+		for (int i = 0; i < NUM_SAMPLES; i++) {
+			imu_data.accel = icm42670_read_accel(&imu); // Replace with actual accel read function
+			imu_data.gyro = icm42670_read_gyro(&imu);   // Replace with actual gyro read function
 
-	        // Store the accelerometer and gyro samples
-	        accel_x_samples[i] = imu_data.accel.x;
-	        accel_y_samples[i] = imu_data.accel.y;
-	        accel_z_samples[i] = imu_data.accel.z;
-	        gyro_x_samples[i] = imu_data.gyro.x;
-	        gyro_y_samples[i] = imu_data.gyro.y;
-	        gyro_z_samples[i] = imu_data.gyro.z;
+			// Store the accelerometer and gyro samples
+			accel_x_samples[i] = imu_data.accel.x;
+			accel_y_samples[i] = imu_data.accel.y;
+			accel_z_samples[i] = imu_data.accel.z;
+			gyro_x_samples[i] = imu_data.gyro.x;
+			gyro_y_samples[i] = imu_data.gyro.y;
+			gyro_z_samples[i] = imu_data.gyro.z;
 
-	        // Optional: Add a small delay between samples if necessary
-	        HAL_Delay(10);
-	    }
+			// Optional: Add a small delay between samples if necessary
+			HAL_Delay(10);
 
-	    // Calculate the standard deviation for each axis of the accelerometer
-	    accel_x_stddev = calculate_standard_deviation(accel_x_samples, NUM_SAMPLES);
-	    accel_y_stddev = calculate_standard_deviation(accel_y_samples, NUM_SAMPLES);
-	    accel_z_stddev = calculate_standard_deviation(accel_z_samples, NUM_SAMPLES);
+			// Check for button shutdown
+			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 
-	    // If the standard deviation of all axes is below the threshold, the accelerometer is stable
-	    if (accel_x_stddev < STABILITY_THRESHOLD && accel_y_stddev < STABILITY_THRESHOLD && accel_z_stddev < STABILITY_THRESHOLD) {
-	        //printf("Accelerometer is stable. Proceeding to gyro offset calculation...\n");
+			// And turn off after 2 minutes of not having become stable
+			if (TIM2->CNT > 120000000) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+		}
 
-	        // Calculate the average of the gyro readings
-	        float sum_gyro[3] = {0.0f, 0.0f, 0.0f};
-	        for (int i = 0; i < NUM_SAMPLES; i++) {
-	            sum_gyro[0] += gyro_x_samples[i];
-	            sum_gyro[1] += gyro_y_samples[i];
-	            sum_gyro[2] += gyro_z_samples[i];
-	        }
+		// Calculate the standard deviation for each axis of the accelerometer
+		accel_x_stddev = calculate_standard_deviation(accel_x_samples, NUM_SAMPLES);
+		accel_y_stddev = calculate_standard_deviation(accel_y_samples, NUM_SAMPLES);
+		accel_z_stddev = calculate_standard_deviation(accel_z_samples, NUM_SAMPLES);
 
-	        gyro_offsets[0] = sum_gyro[0] / NUM_SAMPLES;
-	        gyro_offsets[1] = sum_gyro[1] / NUM_SAMPLES;
-	        gyro_offsets[2] = sum_gyro[2] / NUM_SAMPLES;
+		// If the standard deviation of all axes is below the threshold, the accelerometer is stable
+		if (accel_x_stddev < STABILITY_THRESHOLD && accel_y_stddev < STABILITY_THRESHOLD && accel_z_stddev < STABILITY_THRESHOLD) {
+			//printf("Accelerometer is stable. Proceeding to gyro offset calculation...\n");
 
-	        //printf("Gyro Offsets: X: %f, Y: %f, Z: %f\n", gyro_offsets[0], gyro_offsets[1], gyro_offsets[2]);
-	        break;  // Exit the loop since we have successfully calculated the gyro offsets
-	    } else {
-	        //printf("Accelerometer is not stable. Retrying...\n");
-	    }
+			// Calculate the average of the gyro readings
+			float sum_gyro[3] = {0.0f, 0.0f, 0.0f};
+			for (int i = 0; i < NUM_SAMPLES; i++) {
+				sum_gyro[0] += gyro_x_samples[i];
+				sum_gyro[1] += gyro_y_samples[i];
+				sum_gyro[2] += gyro_z_samples[i];
+			}
 
-	    // Optional: Add a small delay before trying again if needed
-	    // usleep(10000); // Sleep for 10ms (if required)
+			gyro_offsets[0] = sum_gyro[0] / NUM_SAMPLES;
+			gyro_offsets[1] = sum_gyro[1] / NUM_SAMPLES;
+			gyro_offsets[2] = sum_gyro[2] / NUM_SAMPLES;
+
+			//printf("Gyro Offsets: X: %f, Y: %f, Z: %f\n", gyro_offsets[0], gyro_offsets[1], gyro_offsets[2]);
+			break;  // Exit the loop since we have successfully calculated the gyro offsets
+		} else {
+			//printf("Accelerometer is not stable. Retrying...\n");
+		}
+
+		// Optional: Add a small delay before trying again if needed
+		// usleep(10000); // Sleep for 10ms (if required)
 	}
 }
 
@@ -534,13 +567,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			pid.lastTarget = pid.target;
 		}
 
-
 		// Derivative with low-pass filter
 		pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
-
-		//pid.integral += pid.error * pid.i;
-
-		//pid.integral = LIMIT(-pid.limit, pid.integral, pid.limit);
 
 		// PID output
 		pid.output = pid.p * pid.error + pid.derivative;// + pid.integral;
@@ -551,11 +579,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
 		//phaseVoltage = pid.output;
 
-		speed += pid.output;
+		if (pid.on){
+			speed += pid.output;
 
-		speed = LIMIT(-pid.limit, speed, pid.limit);
+			speed = LIMIT(-pid.limit, speed, pid.limit);
 
-		electricalAngle += speed;
+			// Speed should be in meters per second
+
+			electricalAngle += speed * METERS2RAD * POLE_PAIRS / 10000.0f;
+		}
+		else {
+			speed = 0;
+		}
 
 		motorAngleFull = electricalAngle / POLE_PAIRS * RAD2DEG;
 
@@ -574,12 +609,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 // Output:
 //   returns position traveled [m] at time t
 float get_position(uint32_t t, uint32_t duration, float distance) {
-    if (t <= 0) return 0.0f;
-    if (t >= duration) return distance;
+	if (t <= 0) return 0.0f;
+	if (t >= duration) return distance;
 
-    float omega = TWO_PI / duration;
-    float pos = (distance / duration) * (t - (sin(omega * t) / omega));
-    return pos;
+	float omega = TWO_PI / duration;
+	float pos = (distance / duration) * (t - (sin(omega * t) / omega));
+	return pos;
 }
 
 
@@ -587,20 +622,37 @@ struct Movement {
 	uint32_t start;
 	uint32_t running;
 	uint32_t startTimestamp;
-	float distance;
-	uint32_t duration;
+	float accDistance;
+	float accAngle;
+	float coastDistance;
+	float decAngle;
 	float startOffset;
 	int direction;
+	int step;
 };
 
 struct Movement movement = {
-    .start = 0,
-    .running = 0,
-    .startTimestamp = 0,
-    .duration = 3000000,
-    .startOffset = 0.0f,
-	.direction = 1
+		.start = 0,
+		.running = 0,
+		.startTimestamp = 0,
+		.startOffset = 0.0f,
+		.direction = 1
 };
+
+enum {
+	LEFT = -1,
+	RIGHT = 1,
+};
+
+
+enum {
+	ACCELERATING,
+	COASTING,
+	DECELERATING,
+	STOPPING
+};
+
+
 
 
 /// Timing stuff
@@ -618,131 +670,128 @@ unsigned long microsPerReading, microsPrevious, microsUsed;
 /// Quintic Movement Stuff
 
 typedef struct {
-    float rampRatio; // Determines max acceleration used
-    float maxSpeed;
-    float totalDistance;
+	float rampRatio; // Determines max acceleration used
+	float maxSpeed;
+	float totalDistance;
 
-    float rampTime;
-    float cruiseTime;
-    float totalTime;
-    float rampDistance;
-    float cruiseDistance;
+	float rampTime;
+	float cruiseTime;
+	float totalTime;
+	float rampDistance;
+	float cruiseDistance;
 } PositionProfile;
 
 PositionProfile p = {
-    .rampRatio = 0.1f,
-    .maxSpeed = 0.1f,
-    .totalDistance = 0.2f,
-    .rampTime = 0.0f,
-    .cruiseTime = 0.0f,
-    .totalTime = 0.0f,
-    .rampDistance = 0.0f,
-    .cruiseDistance = 0.0f
+		.rampRatio = 0.1f,
+		.maxSpeed = 0.1f,
+		.totalDistance = 0.2f,
+		.rampTime = 0.0f,
+		.cruiseTime = 0.0f,
+		.totalTime = 0.0f,
+		.rampDistance = 0.0f,
+		.cruiseDistance = 0.0f
 };
 
 
 
 void distanceSpeedRampRatioToProfileTimes(PositionProfile &p){
-    // Calculate ramp up / ramp down time
-    p.rampTime = p.maxSpeed / p.rampRatio;
+	// Calculate ramp up / ramp down time
+	p.rampTime = p.maxSpeed / p.rampRatio;
 
-    // Calculate total distance spent ramping up and down
-    p.rampDistance = p.rampTime * p.maxSpeed;
+	// Calculate total distance spent ramping up and down
+	p.rampDistance = p.rampTime * p.maxSpeed;
 
-    // Check if we can accelerate fast enough to reach max Speed
-    if (p.rampDistance <= p.totalDistance){
+	// Check if we can accelerate fast enough to reach max Speed
+	if (p.rampDistance <= p.totalDistance){
 
-        // We can! Calculate distance to spend cruising
-        p.cruiseDistance = p.totalDistance - p.rampDistance;
+		// We can! Calculate distance to spend cruising
+		p.cruiseDistance = p.totalDistance - p.rampDistance;
 
-        // Calculate time spent cruising
-        p.cruiseTime = p.cruiseDistance / p.maxSpeed;
-    }
+		// Calculate time spent cruising
+		p.cruiseTime = p.cruiseDistance / p.maxSpeed;
+	}
 
-    // If we can't reach max speed
-    else {
-        // We're fucked. Gotta recalculate the trajectory
+	// If we can't reach max speed
+	else {
+		// We're fucked. Gotta recalculate the trajectory
 
-        // The ramp ratio determines acceleration. That is fixed. Max speed becomes irrelevant if we can't reach that.
-        // With a ramp ratio of 1 we can reach 1 speed in 1 time, and we'd move 0.5 distance. In total we'd move 1 distance in 2 time.
-        // So for a ramp ratio of 1, the ramp time is 1 if we need to reach 1 distance.
-        // For 4 distance, with a ramp ratio of 1, we'd reach 2 speed in 2 time. Moving 2 distance (0.5 * 2 * 2). Ramp time of 2.
-        // With a ramp ratio of 2, we'd reach 2 speed in 1 time. Moving 1 distance in each half. Total distance of 2. Ramp time of 1.
+		// The ramp ratio determines acceleration. That is fixed. Max speed becomes irrelevant if we can't reach that.
+		// With a ramp ratio of 1 we can reach 1 speed in 1 time, and we'd move 0.5 distance. In total we'd move 1 distance in 2 time.
+		// So for a ramp ratio of 1, the ramp time is 1 if we need to reach 1 distance.
+		// For 4 distance, with a ramp ratio of 1, we'd reach 2 speed in 2 time. Moving 2 distance (0.5 * 2 * 2). Ramp time of 2.
+		// With a ramp ratio of 2, we'd reach 2 speed in 1 time. Moving 1 distance in each half. Total distance of 2. Ramp time of 1.
 
-        p.rampTime = sqrtf(p.totalDistance / p.rampRatio);
-        p.maxSpeed = sqrtf(p.totalDistance * p.rampRatio);
+		p.rampTime = sqrtf(p.totalDistance / p.rampRatio);
+		p.maxSpeed = sqrtf(p.totalDistance * p.rampRatio);
 
-        p.cruiseDistance = 0;
-        p.cruiseTime = 0;
-    }
+		p.cruiseDistance = 0;
+		p.cruiseTime = 0;
+	}
 
-    p.totalTime = 2 * p.rampTime + p.cruiseTime;
+	p.totalTime = 2 * p.rampTime + p.cruiseTime;
 }
 
 
 
-// Quintic curve function [0-1] in [0-1] out
-float quinticCurve(float x) {
-    return 10 * pow(x, 3) - 15 * pow(x, 4) + 6 * pow(x, 5);
+
+
+// This function gets called by the firmware reading the messages from the wireless module when it should give a cue.
+void CUE_Start(uint32_t cue){
+
+	// If the first cue should be started, and the Bibi receiving it is Bibi number 1.
+	if (cue == 1 && BIBI_NUMBER == 1){
+
+		// Move direction is to the left (seen from audience)
+		movement.direction = LEFT;
+
+		// Accelerate for 0.4 meters
+		movement.accDistance = 0.4;
+
+		// The counter weight angle when accelerating [0-90]
+		movement.accAngle = 45;
+
+		// The distance to coast for (pretty much keeps the same speed here)
+		movement.coastDistance = 1.2;
+
+		// The counter weight angle to decelerate at [0-90] (no distance is set here, she decelerates until she stops)
+		movement.decAngle = 45;
+
+		// Set the start flag high, which signals another part of the code to start the movement
+		movement.start = 1;
+	}
+
+	if (cue == 2 && BIBI_NUMBER == 2){
+		movement.direction = RIGHT;
+		movement.accDistance = 0.4;
+		movement.accAngle = 45;
+		movement.coastDistance = 0.6;
+		movement.decAngle = 45;
+		movement.start = 1;
+	}
+	if (cue == 2 && BIBI_NUMBER == 3){
+		HAL_Delay(1000);
+		movement.direction = LEFT;
+		movement.accDistance = 0.4;
+		movement.accAngle = 45;
+		movement.coastDistance = 0.6;
+		movement.decAngle = 45;
+		movement.start = 1;
+	}
+	if (cue == 2 && BIBI_NUMBER == 4){
+		HAL_Delay(8000);
+		movement.direction = RIGHT;
+		movement.accDistance = 0.4;
+		movement.accAngle = 45;
+		movement.coastDistance = 0.6;
+		movement.decAngle = 45;
+		movement.start = 1;
+	}
 }
 
-// Quintic integral function [0-1] in [0-0.5] out
-float quinticIntegral(float x) {
-    return pow(x, 6) - 3 * pow(x, 5) + 2.5 * pow(x, 4);
-}
 
-// Quantic Curve Based Speed Profile
-float quinticSpeedProfile(float currentTime, float rampTime, float cruiseTime, float maxSpeed) {
-    // Limit bottom
-    if (currentTime < 0) return 0;
 
-    // Acceleration
-    if (currentTime < rampTime) {
-        return maxSpeed * quinticCurve(currentTime / rampTime);
-    }
 
-    // Constant velocity
-    else if (currentTime < rampTime + cruiseTime) {
-        return maxSpeed;
-    }
 
-    // Deceleration
-    else if (currentTime < 2 * rampTime + cruiseTime) {
-        return maxSpeed * (1 - quinticCurve((currentTime - rampTime - cruiseTime) / rampTime));
-    }
-
-    // Limit top
-    else {
-        return 0;
-    }
-}
-
-// Quantic Curve Based Speed Profile Position Integral
-float quinticPositionProfile(float currentTime, float rampTime, float cruiseTime, float maxSpeed) {
-
-    // Limit bottom
-    if (currentTime < 0) return 0;
-
-    // Acceleration
-    if (currentTime < rampTime) {
-        return quinticIntegral(currentTime / rampTime) * rampTime * maxSpeed;
-    }
-
-    // Constant velocity
-    else if (currentTime < rampTime + cruiseTime) {
-        return 0.5 * maxSpeed * rampTime + (currentTime - rampTime) * maxSpeed;
-    }
-
-    // Deceleration
-    else if (currentTime < 2 * rampTime + cruiseTime) {
-        return maxSpeed * rampTime + cruiseTime * maxSpeed - (quinticIntegral((2 * rampTime + cruiseTime - currentTime) / rampTime) * rampTime * maxSpeed);
-    }
-
-    // Limit top
-    else {
-        return maxSpeed * rampTime + cruiseTime * maxSpeed;
-    }
-}
 
 
 
@@ -771,36 +820,15 @@ int main(void) {
 
 
 
-
-	// Set VREF to 2.5V
-	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
-
-
-
 	// Start microsecond timer, overflows after 71 minutes.
 	HAL_TIM_Base_Start(&htim2);
 
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 
 
+	/// Do ADC Stuff
 
-
-
-
-
-
-
-
-
-	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
-	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
-
+	// Set VREF to 2.5V
+	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
 
 	ADC1->CR |= ADC_CR_ADCAL;
 	while (ADC1->CR & ADC_CR_ADCAL);  // Wait until calibration is done
@@ -811,11 +839,13 @@ int main(void) {
 	HAL_ADC_Start(&hadc1);
 	HAL_ADC_Start(&hadc2);
 
-
-
 	ADC.vrefintCal = *VREFINT_CAL_ADDR;
 	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
 
+
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 
 	// Charge power only, no button pressed
 	while (!HAL_GPIO_ReadPin(BUT1_GPIO_Port, BUT1_Pin)){
@@ -831,15 +861,16 @@ int main(void) {
 	}
 
 
-
+	// If second button is pressed during startup, this will be a controller
+	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
+		BIBI_Mode = CONTROLLING_BIBI;
+	}
 
 
 	// Keep itself on
 	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
 
 
-	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
-	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
 
 
 
@@ -853,12 +884,10 @@ int main(void) {
 	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
 	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
-//	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
-//
-//	icm42670_write(&imu, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
+	//	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
+	//
+	//	icm42670_write(&imu, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
 
-	// Initialize sine lookup table
-	initSinTable();
 
 
 
@@ -875,15 +904,92 @@ int main(void) {
 	 */
 
 
-//	const uint8_t ACCEL_UI_FILT_BW_16HZ = 0b111;
-//	const uint8_t ACCEL_UI_FILT_BW_34HZ = 0b101;
-//
-//	icm42670_write(&imu, ICM42670_REG_ACCEL_CONFIG1, &ACCEL_UI_FILT_BW_34HZ, 1);
+	//	const uint8_t ACCEL_UI_FILT_BW_16HZ = 0b111;
+	//	const uint8_t ACCEL_UI_FILT_BW_34HZ = 0b101;
+	//
+	//	icm42670_write(&imu, ICM42670_REG_ACCEL_CONFIG1, &ACCEL_UI_FILT_BW_34HZ, 1);
 
 
 
 
-	configNRF(10);
+	configNRF(101);
+
+
+
+
+	if (BIBI_Mode == CONTROLLING_BIBI){
+
+		// Wait for button release
+		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
+
+		while (1){
+
+			// Send messages every 10ms
+			if (TIM2->CNT - microsPrevious >= 10000) {
+
+				// Update global battery Voltage
+				BAT_Update();
+
+				// Display Battery on led
+				BAT_VoltageToRGB(BAT.voltage * ((TIM2->CNT / 500000) & 1));
+
+				// Run charge management logic
+				CHG_RunLogic();
+
+				// Low battery shut down
+				if (TIM2->CNT > 1000000){
+					if (BAT.voltage < 3.0f) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+				}
+
+				// Button shut down
+				if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+
+				// Read accelerometer
+				imu_data.accel = icm42670_read_accel(&imu);
+
+				// Compute gravity angle
+				imu_data.angle = atan2f(imu_data.accel.y, -imu_data.accel.x) * 180.0f / (float)M_PI;
+
+				// Set command
+				buffer[0] = CONTROL_BIBI;
+
+				// Set angle
+				buffer[1] = (LIMIT(-45.0f, imu_data.angle, 45.0f) + 45.0f) / 90.0f * 255.0f;
+
+				// Send data
+				NRF_Send(buffer);
+				while (NRF_IsSending());
+
+				// Increase timestamp
+				microsPrevious = microsPrevious + microsPerReading;
+			}
+		}
+	}
+
+
+
+
+
+
+
+	// Enable motor stuff
+	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
+	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
+
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+
+
+
+	// Initialize sine lookup table
+	initSinTable();
+
+
+
+
+
+
 
 
 
@@ -892,11 +998,11 @@ int main(void) {
 	waitForStableGetGyroOffsets();
 
 
-//	setPhaseVoltage(5.65, _3PI_2);
-//	HAL_Delay(4000);
-//	ENC_Update();
-//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
-//	setPhaseVoltage(0, _3PI_2);
+	//	setPhaseVoltage(5.65, _3PI_2);
+	//	HAL_Delay(4000);
+	//	ENC_Update();
+	//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
+	//	setPhaseVoltage(0, _3PI_2);
 
 
 
@@ -914,7 +1020,7 @@ int main(void) {
 	microsPrevious = TIM2->CNT;
 
 	// Start main motor interrupt
-//	HAL_TIM_Base_Start_IT(&htim6);
+	HAL_TIM_Base_Start_IT(&htim6);
 
 	while (1)  {
 
@@ -951,17 +1057,9 @@ int main(void) {
 			// update the filter, which computes orientation
 			filter.updateIMU(imu_data.gyroZerod.x, imu_data.gyroZerod.y, imu_data.gyroZerod.z, imu_data.accel.x, imu_data.accel.y, imu_data.accel.z);
 
-			float roll = filter.getRoll();
-			float pitch = filter.getPitch();
-			float heading = filter.getYaw();
-
-
-
-
-
 
 			// Assuming imu_data.angle is in [0, 360)
-			madgwick.currentAngle = (roll < 0) ? pitch - 90.0f : 90.0f - pitch;
+			madgwick.currentAngle = (filter.getRoll() < 0) ? filter.getPitch() - 90.0f : 90.0f - filter.getPitch();
 			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
 			madgwick.anglePrev = madgwick.currentAngle;
 
@@ -979,99 +1077,138 @@ int main(void) {
 			// Compute the angle the diabolo has made from its startup position
 			diaboloAngleFull = motorAngleFull + madgwick.angleFull;
 
-			diaboloDistance = diaboloAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE;
+			diaboloPosition = diaboloAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE;
 
-			error = diaboloDistance - (motorAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE);
+			diaboloSpeed = SPEED_ALPHA * (diaboloPosition - lastDiaboloPosition) * 1000.0f + (1.0f - SPEED_ALPHA) * diaboloSpeed;
+
+			diaboloAcceleration = ACCEL_ALPHA * (diaboloSpeed - lastDiaboloSpeed) * 1000.0f + (1.0f - ACCEL_ALPHA) * diaboloAcceleration;
+
+			lastDiaboloPosition = diaboloPosition;
+			lastDiaboloSpeed = diaboloSpeed;
+
+
+
+
 
 			if (movement.start){
 				movement.start = 0;
 				movement.running = 1;
 				movement.startTimestamp = TIM2->CNT;
-				movement.startOffset = electricalAngle * _1_DIV_POLE_PAIRS * RAD2METERS;
+				movement.startOffset = diaboloPosition;
+				movement.step = ACCELERATING;
 
-				p.totalDistance;
-
+				pid.on = 1;
+				pid.target = movement.accAngle * (0 - movement.direction);
 				phaseVoltage = 5;
-
-				distanceSpeedRampRatioToProfileTimes(p);
 			}
 
 
 			if (movement.running) {
-				float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
+				if (movement.direction == RIGHT){
+					if ((movement.step == ACCELERATING) && ((diaboloPosition - movement.startOffset) > movement.accDistance)){
+						movement.step = COASTING;
+						pid.target = 0;
+					}
+					if ((movement.step == COASTING) && ((diaboloPosition - movement.startOffset) > (movement.accDistance + movement.coastDistance))){
+						movement.step = DECELERATING;
+						pid.target = movement.decAngle * movement.direction;
+					}
+					if ((movement.step == DECELERATING) && diaboloSpeed < 0){
+						movement.step = STOPPING;
+						pid.target = 0;
+						movement.running = 0;
+						phaseVoltage = 2;
+						pid.on = 0;
+					}
+				}
 
-				electricalAngle = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed)) * METERS2RAD * POLE_PAIRS;
-
-				if (runTime >= p.totalTime + 1.0f) {
-					movement.running = 0;
-					movement.direction = -movement.direction;
-					phaseVoltage = 2;
+				if (movement.direction == LEFT){
+					if ((movement.step == ACCELERATING) && ((movement.startOffset - diaboloPosition) > movement.accDistance)){
+						movement.step = COASTING;
+						pid.target = 0;
+					}
+					if ((movement.step == COASTING) && ((movement.startOffset - diaboloPosition) > (movement.accDistance + movement.coastDistance))){
+						movement.step = DECELERATING;
+						pid.target = movement.decAngle * movement.direction;
+					}
+					if ((movement.step == DECELERATING) && diaboloSpeed > 0){
+						movement.step = STOPPING;
+						pid.target = 0;
+						movement.running = 0;
+						phaseVoltage = 2;
+						pid.on = 0;
+					}
 				}
 			}
 
 
-			setPhaseVoltage(phaseVoltage, electricalAngle);
+			if (TIM2->CNT - NRF_ReceiveTimestamp > 20000){
+				//	    		pid.target = 0;
+			}
+			if (TIM2->CNT - NRF_ReceiveTimestamp > 2000000){
+				//	    		phaseVoltage = 0;
+				//	    		speed = 0;
 
-
+				// Turn bibi controlled mode off if no message for 2 seconds.
+				if (BIBI_Mode == BIBI_CONTROLLED){
+					BIBI_Mode = UNDEFINED;
+				}
+			}
 
 
 			if (NRF_DataReady()) {
-			    NRF_GetData(buffer);
-			    memcpy(&rxData, buffer, sizeof(ControlData));  // Copy buffer to struct
+				NRF_GetData(buffer);
+				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
+				NRF_ReceiveTimestamp = TIM2->CNT;
 
-			    // Check if it's a message 1 for everyone
-			    if (rxData.who == 0 && rxData.what == 1 && !movement.running){
+				if (buffer[0] == START_CUE && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE) && BIBI_Mode != BIBI_CONTROLLED){
+					if (buffer[3] == 1){
+						CUE_Start(1);
+					}
+					else if (buffer[3] == 2){
+						CUE_Start(2);
+					}
+					else if (buffer[3] == 4){
+						CUE_Start(3);
+					}
+					else if (buffer[3] == 8){
+						CUE_Start(4);
+					}
+				}
 
-			    	// Copy data
-			    	p.maxSpeed = rxData.maxSpeed * 0.01f;
-			    	p.rampRatio = rxData.accelerationRatio * 0.01f;
-			    	p.totalDistance = rxData.distance / 50.0f;
-			    	movement.direction = rxData.direction ? 1 : -1;
+#define CONTROL_BIBI_MAX_ANGLE 75.0f
+#define CONTROL_BIBI_MAX_POWER_ANGLE 90.0f
 
-			    	// Raise movement start flag
-			    	movement.start = 1;
-			    }
+				if (buffer[0] == CONTROL_BIBI && BIBI_NUMBER == 1){
+					pid.target = buffer[1] / 255.0f * CONTROL_BIBI_MAX_ANGLE * 2 - CONTROL_BIBI_MAX_ANGLE;
+					phaseVoltage = 5.0f + LIMIT(0, ABS(pid.target) / CONTROL_BIBI_MAX_POWER_ANGLE, 1.5f);
+					pid.on = 1;
+
+					BIBI_Mode = BIBI_CONTROLLED;
+				}
 			}
+
 
 
 			// Debug send command
 			if (send == 1) {
-			    send = 0;
+				send = 0;
 
-			    txData.who = 0;
-			    txData.what = 1;
-			    txData.maxSpeed = p.maxSpeed * 100.0f;          // * 0.01f
-			    txData.accelerationRatio = p.rampRatio * 100.0f; // * 0.01f
-			    txData.distance = p.totalDistance * 50.0f;          // * 2.0f;
-			    txData.direction = movement.direction == 1 ? 1 : 0;
-
-			    memcpy(buffer, &txData, sizeof(ControlData));  // Copy struct to buffer
-
-			    NRF_Send(buffer);
-			    while (NRF_IsSending());
+				NRF_Send(buffer);
+				while (NRF_IsSending());
 			}
 
 
-//			pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
+			// pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
-			myData.a = electricalAngle;
-			myData.b = 0;//planner.vel_target;//est_vel;
-			myData.c = 0;//planner.acel_now;//est_acc;
-			myData.d = 0;//planner.jerk_now;
+			myData.a = diaboloPosition;
+			myData.b = diaboloSpeed;
+			myData.c = diaboloAcceleration;
+			myData.d = 0;
 			myData.e = 0;
 
-
-
-			if (movement.running) sendFloats(&myData);
-
-			//		NRF_Send(buffer);
-			//		while (NRF_IsSending());
-			//
-			//		RGB_Set(0, 0, 0);
-			//		HAL_Delay(100);
-			//		BAT_VoltageToRGB(BAT.voltage);
-			//		HAL_Delay(400);
+			sendFloats(&myData);
 
 			microsUsed = TIM2->CNT - microsPrevious - microsPerReading;
 
