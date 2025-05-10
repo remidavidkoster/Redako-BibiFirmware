@@ -97,6 +97,19 @@ void NRF_Init() {
 	csnHigh();
 }
 
+
+// Constants for RF power
+#define RF_PWR_NEG18DBM  0x00
+#define RF_PWR_NEG12DBM  0x02
+#define RF_PWR_NEG6DBM   0x04
+#define RF_PWR_0DBM      0x06
+
+// Constants for data rate
+#define RF_DR_250KBPS    0x20
+#define RF_DR_1MBPS      0x00
+#define RF_DR_2MBPS      0x08
+
+
 // Sets the important registers in the MiRF module and powers the module
 // in receiving mode
 // NB: channel and payload must be set now.
@@ -109,7 +122,10 @@ void NRF_Config() {
 	configRegister(RX_PW_P1, payload);
 	configRegister(EN_AA, 0); // No auto ack?
 	configRegister(SETUP_RETR, 0B00000000); // No retransmits?
-	configRegister(RF_SETUP, 0B00001000);
+
+
+//    configRegister(RF_SETUP, RF_DR_250KBPS | RF_PWR_0DBM);
+    configRegister(RF_SETUP, 0x27);
 	// Start receiver
 	powerUpRx();
 	flushRx();
