@@ -81,7 +81,6 @@ uint32_t NRF_ReceiveInterval;
 
 
 
-
 typedef enum {
     CUE_CONTROLLED,
     REMOTE_CONTROLLED
@@ -290,7 +289,7 @@ int main(void) {
 	    configNRFTCMfx();
 
 		pid.on = 0;
-		phaseVoltage = 3;
+		phaseVoltage = 2;
 		pid.target = 0;
 	}
 
@@ -396,63 +395,62 @@ int main(void) {
 
 
 
+			// If we still have cued movements, and there's currently none running
+			if (quedMovementCount && !movement.running){
+
+				// If it's time for the next one
+				if (TIM2->CNT > quedMovements[0].startTime){
+
+					// Start next cued movement
+					startMovement(quedMovements[0]);
+
+					// Move cues down a row
+				    memmove(&quedMovements[0], &quedMovements[1], sizeof(struct MovementStep) * (MAX_QUEUES - 1));
+
+				    // Zero out the last element
+				    memset(&quedMovements[MAX_QUEUES - 1], 0, sizeof(struct MovementStep));
+
+				    // Decrement qued movement counter
+				    quedMovementCount--;
+				}
+			}
+
 
 			if (movement.start){
-				movement.startTimestamp = TIM2->CNT;
 				movement.start = 0;
+				movement.startTimestamp = TIM2->CNT;
 				movement.running = 1;
-				movement.step = WAITING;
+				movement.step = ACCELERATING;
+				movement.startOffset = diaboloPosition;
+                pid.target = -movement.accAngle * movement.direction;
+				phaseVoltage = 5;
+				pid.on = 1;
 			}
 
 			if (movement.running) {
-				if (movement.step == WAITING && TIM2->CNT - movement.startTimestamp > movement.startDelay * 1000000){
-					movement.startOffset = diaboloPosition;
-					pid.on = 1;
-					pid.target = movement.accAngle * (0 - movement.direction);
-					phaseVoltage = 5;
-					movement.step = ACCELERATING;
+				float positionDelta = (diaboloPosition - movement.startOffset) * movement.direction;
+
+				if (movement.step == ACCELERATING && positionDelta > movement.accDistance) {
+					movement.step = COASTING;
+					pid.target = -2 * movement.direction;
 				}
 
-				if (movement.direction == RIGHT){
-					if ((movement.step == ACCELERATING) && ((diaboloPosition - movement.startOffset) > movement.accDistance)){
-						movement.step = COASTING;
-						pid.target = 0;
-					}
-					if ((movement.step == COASTING) && ((diaboloPosition - movement.startOffset) > (movement.accDistance + movement.coastDistance))){
-						movement.step = DECELERATING;
-						pid.target = movement.decAngle * movement.direction;
-					}
-					if ((movement.step == DECELERATING) && diaboloSpeed < 0.1f){
-						movement.step = STOPPING;
-						pid.target = 0;
-						movement.stoppingTimestamp = TIM2->CNT;
-					}
-					if ((movement.step == STOPPING) && TIM2->CNT - movement.stoppingTimestamp >= 500000){
-						movement.running = 0;
-						phaseVoltage = 3;
-						pid.on = 0;
-					}
+				if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
+					movement.step = DECELERATING;
+					pid.target = movement.decAngle * movement.direction;
 				}
 
-				if (movement.direction == LEFT){
-					if ((movement.step == ACCELERATING) && ((movement.startOffset - diaboloPosition) > movement.accDistance)){
-						movement.step = COASTING;
-						pid.target = 0;
-					}
-					if ((movement.step == COASTING) && ((movement.startOffset - diaboloPosition) > (movement.accDistance + movement.coastDistance))){
-						movement.step = DECELERATING;
-						pid.target = movement.decAngle * movement.direction;
-					}
-					if ((movement.step == DECELERATING) && diaboloSpeed > -0.1f){
-						movement.step = STOPPING;
-						pid.target = 0;
-						movement.stoppingTimestamp = TIM2->CNT;
-					}
-					if ((movement.step == STOPPING) && TIM2->CNT - movement.stoppingTimestamp >= 500000){
-						movement.running = 0;
-						phaseVoltage = 3;
-						pid.on = 0;
-					}
+				if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
+					movement.step = STOPPING;
+					pid.target = 0;
+					movement.stoppingTimestamp = TIM2->CNT;
+				}
+
+				if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
+					movement.running = 0;
+					phaseVoltage = 2;
+					pid.on = 0;
+					movement.endTimestamp = TIM2->CNT;
 				}
 			}
 
@@ -487,10 +485,19 @@ int main(void) {
 
 			else {
 
+
+				// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
+				if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
+					lastCueStarted = 0;
+				}
+
+
+
 				if (NRF_DataReady()) {
 					NRF_GetData(buffer);
 					NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 					NRF_ReceiveTimestamp = TIM2->CNT;
+
 
 					if (buffer[0] == START_CUE && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
 						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);

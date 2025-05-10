@@ -6,41 +6,64 @@
 
 
 // StartMovement:
-//   start delay [ms]
 //   direction [LEFT, RIGHT]
 //   acceleration distance [m]
 //   acceleration angle [0°-60°]
 //   coast distance [m]
 //   deceleration angle [0°-60°]
+//   start delay [s]
 
 
+// Cue 1
+// and then, without WARNING (1:39)
+
+// +20s
+// with an air of quiet confidence, the DIABOLO (1:59) moves closer
+
+// Cue 2
+// diabolos, unlike handbalancers, travel in FLOCK (3:23)
+
+// +8s
+// MORE (3:31) diabolos emerge
+
+// Cue 3
+// making her presence appear far larger than it truely IS (5:04)
+
+// Cue 4
+// Aylish shooing the last Bibi away
 
 
 void CUE_Start(uint8_t BIBI_NUMBER, uint32_t cue) {
-    if (BIBI_NUMBER == 1) {
-        if (cue == 1) startMovement((struct MovementStep){0, LEFT, 0.4, 45, 1.2, 45});
-        if (cue == 2);
-        if (cue == 3);
-        if (cue == 4);
-    }
-    if (BIBI_NUMBER == 2) {
-        if (cue == 1);
-        if (cue == 2) startMovement((struct MovementStep){0, RIGHT, 0.4, 45, 0.6, 45});
-        if (cue == 3);
-        if (cue == 4);
-    }
-    if (BIBI_NUMBER == 3) {
-        if (cue == 1);
-        if (cue == 2) startMovement((struct MovementStep){1, LEFT, 0.4, 45, 0.6, 45});
-        if (cue == 3);
-        if (cue == 4);
-    }
-    if (BIBI_NUMBER == 4) {
-        if (cue == 1);
-        if (cue == 2) startMovement((struct MovementStep){8, RIGHT, 0.5, 45, 0.5, 45});
-        if (cue == 3);
-        if (cue == 4);
-    }
+	if (cue != lastCueStarted){
+		lastCueStarted = cue;
+		if (BIBI_NUMBER == 1) {
+			if (cue == 1) {
+				startMovement((struct MovementStep){LEFT, 0.4, 45, 0.6, 45});
+				queMovement((struct MovementStep){LEFT, 0.3, 30, 0.3, 30}, 20);
+			}
+			if (cue == 2);
+			if (cue == 3);
+			if (cue == 4) startMovement((struct MovementStep){RIGHT, 5, 60, 5, 45});
+		}
+		if (BIBI_NUMBER == 2) {
+			if (cue == 1);
+			if (cue == 2) startMovement((struct MovementStep){RIGHT, 0.4, 45, 0.6, 45});
+			if (cue == 3) queMovement((struct MovementStep){LEFT, 0.4, 20, 0.6, 20}, 30);
+			if (cue == 4);
+		}
+		if (BIBI_NUMBER == 3) {
+			if (cue == 1);
+			if (cue == 2) queMovement((struct MovementStep){LEFT, 0.4, 45, 0.6, 45}, 1);
+			if (cue == 3) queMovement((struct MovementStep){RIGHT, 0.4, 20, 0.6, 45}, 40);
+			if (cue == 4);
+		}
+		if (BIBI_NUMBER == 4) {
+			if (cue == 1);
+			if (cue == 2) queMovement((struct MovementStep){RIGHT, 0.5, 45, 0.5, 45}, 8);
+			if (cue == 3) queMovement((struct MovementStep){LEFT, 0.5, 20, 0.5, 20}, 50);
+			if (cue == 4);
+		}
+	}
 }
 
 #endif

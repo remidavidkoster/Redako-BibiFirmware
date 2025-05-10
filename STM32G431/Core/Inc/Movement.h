@@ -7,7 +7,6 @@ enum {
 	RIGHT = 1,
 };
 
-
 enum {
 	WAITING,
 	ACCELERATING,
@@ -21,8 +20,8 @@ struct Movement {
 	uint32_t start;
 	uint32_t running;
 	uint32_t startTimestamp;
+	uint32_t endTimestamp;
 	uint32_t stoppingTimestamp;
-	float startDelay;
 	float accDistance;
 	float accAngle;
 	float coastDistance;
@@ -44,24 +43,30 @@ struct Movement movement = {
 
 
 
-
+enum {
+	START_TIME,
+	CURRENT_TIME,
+	END_TIME,
+};
 
 // Structure to hold a single movement
 struct MovementStep {
-    float delay;         // Delay before this movement starts [s]
     int direction;       // Direction [LEFT, RIGHT]
     float accDistance;   // Acceleration distance [m]
     float accAngle;      // Acceleration angle [0°-60°]
     float coastDistance; // Coast distance [m]
     float decAngle;      // Deceleration angle [0°-60°]
+    uint32_t startTime;         // Delay before this movement starts [s]
 };
 
+#define MAX_QUEUES 100
 
-
+MovementStep quedMovements[MAX_QUEUES];
+uint8_t quedMovementCount;
+uint8_t lastCueStarted;
 
 
 void startMovement(struct MovementStep step) {
-    movement.startDelay = step.delay;
     movement.direction = step.direction;
     movement.accDistance = step.accDistance;
     movement.accAngle = step.accAngle;
@@ -69,6 +74,17 @@ void startMovement(struct MovementStep step) {
     movement.decAngle = step.decAngle;
     movement.start = 1;
 }
+
+
+
+
+
+void queMovement(struct MovementStep step, float delay){
+	step.startTime = TIM2->CNT + 1000000 * delay;
+	quedMovements[quedMovementCount] = step;
+	quedMovementCount++;
+}
+
 
 
 
