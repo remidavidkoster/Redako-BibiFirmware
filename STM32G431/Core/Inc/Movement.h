@@ -9,6 +9,7 @@ enum {
 
 
 enum {
+	WAITING,
 	ACCELERATING,
 	COASTING,
 	DECELERATING,
@@ -20,6 +21,8 @@ struct Movement {
 	uint32_t start;
 	uint32_t running;
 	uint32_t startTimestamp;
+	uint32_t stoppingTimestamp;
+	float startDelay;
 	float accDistance;
 	float accAngle;
 	float coastDistance;
@@ -40,16 +43,31 @@ struct Movement movement = {
 };
 
 
-void startMovement(uint32_t delayMs, int dir, float accDist, int accAng, float coastDist, int decAng) {
-	if (delayMs > 0) {
-		HAL_Delay(delayMs);
-	}
-	movement.direction = dir;
-	movement.accDistance = accDist;
-	movement.accAngle = accAng;
-	movement.coastDistance = coastDist;
-	movement.decAngle = decAng;
-	movement.start = 1;
+
+
+
+// Structure to hold a single movement
+struct MovementStep {
+    float delay;         // Delay before this movement starts [s]
+    int direction;       // Direction [LEFT, RIGHT]
+    float accDistance;   // Acceleration distance [m]
+    float accAngle;      // Acceleration angle [0°-60°]
+    float coastDistance; // Coast distance [m]
+    float decAngle;      // Deceleration angle [0°-60°]
+};
+
+
+
+
+
+void startMovement(struct MovementStep step) {
+    movement.startDelay = step.delay;
+    movement.direction = step.direction;
+    movement.accDistance = step.accDistance;
+    movement.accAngle = step.accAngle;
+    movement.coastDistance = step.coastDistance;
+    movement.decAngle = step.decAngle;
+    movement.start = 1;
 }
 
 

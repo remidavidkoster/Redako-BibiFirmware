@@ -144,6 +144,10 @@ void setPhaseVoltage(float Uq, float angle_el) {
 }
 
 
-
+//	setPhaseVoltage(5.65, _3PI_2);
+//	HAL_Delay(4000);
+//	ENC_Update();
+//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
+//	setPhaseVoltage(0, _3PI_2);
 
 #endif /* INC_MOTORMATH_H_ */

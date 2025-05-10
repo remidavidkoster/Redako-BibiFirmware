@@ -80,7 +80,7 @@ float calculate_standard_deviation(float *data, int num_samples) {
 }
 
 
-#define STABILITY_THRESHOLD 0.0025f  // Threshold for accelerometer standard deviation
+#define STABILITY_THRESHOLD 0.003f  // Threshold for accelerometer standard deviation
 #define NUM_SAMPLES 100          // Number of samples to collect for both accelerometer and gyro
 #define GRAVITY 9.81f             // Gravity constant in m/s^2
 
@@ -157,7 +157,25 @@ void waitForStableGetGyroOffsets(){
 
 
 
+//	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
+//
+//	icm42670_write(&imu, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
 
+/*
+000: Low pass filter bypassed
+001: 180 Hz
+010: 121 Hz
+011: 73 Hz
+100: 53 Hz
+101: 34 Hz
+110: 25 Hz
+111: 16 Hz
+ */
+
+//	const uint8_t ACCEL_UI_FILT_BW_16HZ = 0b111;
+//	const uint8_t ACCEL_UI_FILT_BW_34HZ = 0b101;
+//
+//	icm42670_write(&imu, ICM42670_REG_ACCEL_CONFIG1, &ACCEL_UI_FILT_BW_34HZ, 1);
 
 
 

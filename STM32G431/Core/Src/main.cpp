@@ -17,10 +17,13 @@
 #include "IMU.h"
 #include "BibiSupport.h"
 #include "Debug.h"
+#include "UID.h"
 
 void SystemClock_Config(void);
 
 
+// Identification number of this bibi
+uint8_t BIBI_Number;
 
 
 
@@ -80,14 +83,11 @@ uint32_t NRF_ReceiveInterval;
 
 
 typedef enum {
-    UNDEFINED = 0,
-    BIBI_CONTROLLED,
     CUE_CONTROLLED,
-    CONTROLLING_BIBI,
     REMOTE_CONTROLLED
 } BIBI_Mode_t;
 
-BIBI_Mode_t BIBI_Mode;
+BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
 
 
 
@@ -121,7 +121,7 @@ typedef struct {
 
 
 volatile PIDController pid = {
-		.p = 0.000003f,
+		.p = 0.000002f,
 		.d = 0.01f,
 		.alpha = 0.001f,  // Set this based on how much filtering you want
 		.limit = 2.0f,
@@ -242,9 +242,13 @@ int main(void) {
 	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
 
 
+
+	// RGB Led PWM Channels
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+
+
 
 	// Charge power only, no button pressed
 	while (!HAL_GPIO_ReadPin(BUT1_GPIO_Port, BUT1_Pin)){
@@ -259,121 +263,36 @@ int main(void) {
 		CHG_RunLogic();
 	}
 
-
-	// If second button is pressed during startup, this will be a controller
+	// If second button is pressed during startup, this will be remote controlled
 	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
 		BIBI_Mode = REMOTE_CONTROLLED;
 	}
-
 
 	// Keep itself on
 	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
 
 
+	BIBI_Number = BIBI_GetID();
 
 
-
-	//ICM42670 Init
-	if(icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2) != HAL_OK){
-		failed = 1;
-	}
-
-	// Setup rate & scale
+	//ICM42670 Init, etup rate & scale
+	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2);
 	icm42670_mclk_on(&imu);
 	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
 	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
-	//	const uint8_t GYRO_UI_FILT_BW_180HZ = 0b001;
-	//
-	//	icm42670_write(&imu, ICM42670_REG_GYRO_CONFIG1, &GYRO_UI_FILT_BW_180HZ, 1);
 
 
+	if (BIBI_Mode == REMOTE_CONTROLLED) {
+	    configNRFSyma();
+	    while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
+	} else {
+	    configNRFTCMfx();
 
-
-
-	/*
-	000: Low pass filter bypassed
-	001: 180 Hz
-	010: 121 Hz
-	011: 73 Hz
-	100: 53 Hz
-	101: 34 Hz
-	110: 25 Hz
-	111: 16 Hz
-	 */
-
-
-	//	const uint8_t ACCEL_UI_FILT_BW_16HZ = 0b111;
-	//	const uint8_t ACCEL_UI_FILT_BW_34HZ = 0b101;
-	//
-	//	icm42670_write(&imu, ICM42670_REG_ACCEL_CONFIG1, &ACCEL_UI_FILT_BW_34HZ, 1);
-
-
-
-
-
-
-
-	if (BIBI_Mode != REMOTE_CONTROLLED)	configNRFTCMfx();
-	else                                configNRFSyma();
-
-
-	if (BIBI_Mode == REMOTE_CONTROLLED){
-
-		// Wait for button release
-		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
+		pid.on = 0;
+		phaseVoltage = 3;
+		pid.target = 0;
 	}
-
-	if (BIBI_Mode == CONTROLLING_BIBI){
-
-		// Wait for button release
-		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
-
-		while (1){
-
-			// Send messages every 10ms
-			if (TIM2->CNT - microsPrevious >= 10000) {
-
-				// Update global battery Voltage
-				BAT_Update();
-
-				// Display Battery on led
-				BAT_VoltageToRGB(BAT.voltage * ((TIM2->CNT / 500000) & 1));
-
-				// Run charge management logic
-				CHG_RunLogic();
-
-				// Low battery shut down
-				if (TIM2->CNT > 1000000){
-					if (BAT.voltage < 3.0f) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-				}
-
-				// Button shut down
-				if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-
-				// Read accelerometer
-				imu_data.accel = icm42670_read_accel(&imu);
-
-				// Compute gravity angle
-				imu_data.angle = atan2f(imu_data.accel.y, -imu_data.accel.x) * 180.0f / (float)M_PI;
-
-				// Set command
-				buffer[0] = CONTROL_BIBI;
-
-				// Set angle
-				buffer[1] = (LIMIT(-45.0f, imu_data.angle, 45.0f) + 45.0f) / 90.0f * 255.0f;
-
-				// Send data
-				NRF_Send(buffer);
-				while (NRF_IsSending());
-
-				// Increase timestamp
-				microsPrevious = microsPrevious + microsPerReading;
-			}
-		}
-	}
-
-
 
 
 
@@ -387,33 +306,11 @@ int main(void) {
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
-
-
 	// Initialize sine lookup table
 	initSinTable();
 
-
-
-
-
-
-
-
-
-
-
+	// Wait until stable and get gyro offsets
 	waitForStableGetGyroOffsets();
-
-
-	//	setPhaseVoltage(5.65, _3PI_2);
-	//	HAL_Delay(4000);
-	//	ENC_Update();
-	//	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
-	//	setPhaseVoltage(0, _3PI_2);
-
-
-
-
 
 
 
@@ -429,8 +326,10 @@ int main(void) {
 	// Start main motor interrupt
 	HAL_TIM_Base_Start_IT(&htim6);
 
+
 	while (1)  {
 
+		// If another loop is due
 		if (TIM2->CNT - microsPrevious >= microsPerReading) {
 
 			// Update global battery Voltage
@@ -453,6 +352,7 @@ int main(void) {
 
 
 
+
 			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
 			imu_data.accel = icm42670_read_accel(&imu);
 			imu_data.gyro = icm42670_read_gyro(&imu);
@@ -470,7 +370,7 @@ int main(void) {
 			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
 			madgwick.anglePrev = madgwick.currentAngle;
 
-			// Detect wrap-around and update turn counter
+			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
 			//			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
 			//			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
 
@@ -498,19 +398,21 @@ int main(void) {
 
 
 			if (movement.start){
+				movement.startTimestamp = TIM2->CNT;
 				movement.start = 0;
 				movement.running = 1;
-				movement.startTimestamp = TIM2->CNT;
-				movement.startOffset = diaboloPosition;
-				movement.step = ACCELERATING;
-
-				pid.on = 1;
-				pid.target = movement.accAngle * (0 - movement.direction);
-				phaseVoltage = 5;
+				movement.step = WAITING;
 			}
 
-
 			if (movement.running) {
+				if (movement.step == WAITING && TIM2->CNT - movement.startTimestamp > movement.startDelay * 1000000){
+					movement.startOffset = diaboloPosition;
+					pid.on = 1;
+					pid.target = movement.accAngle * (0 - movement.direction);
+					phaseVoltage = 5;
+					movement.step = ACCELERATING;
+				}
+
 				if (movement.direction == RIGHT){
 					if ((movement.step == ACCELERATING) && ((diaboloPosition - movement.startOffset) > movement.accDistance)){
 						movement.step = COASTING;
@@ -520,11 +422,14 @@ int main(void) {
 						movement.step = DECELERATING;
 						pid.target = movement.decAngle * movement.direction;
 					}
-					if ((movement.step == DECELERATING) && diaboloSpeed < 0){
+					if ((movement.step == DECELERATING) && diaboloSpeed < 0.1f){
 						movement.step = STOPPING;
 						pid.target = 0;
+						movement.stoppingTimestamp = TIM2->CNT;
+					}
+					if ((movement.step == STOPPING) && TIM2->CNT - movement.stoppingTimestamp >= 500000){
 						movement.running = 0;
-						phaseVoltage = 2;
+						phaseVoltage = 3;
 						pid.on = 0;
 					}
 				}
@@ -538,32 +443,34 @@ int main(void) {
 						movement.step = DECELERATING;
 						pid.target = movement.decAngle * movement.direction;
 					}
-					if ((movement.step == DECELERATING) && diaboloSpeed > 0){
+					if ((movement.step == DECELERATING) && diaboloSpeed > -0.1f){
 						movement.step = STOPPING;
 						pid.target = 0;
+						movement.stoppingTimestamp = TIM2->CNT;
+					}
+					if ((movement.step == STOPPING) && TIM2->CNT - movement.stoppingTimestamp >= 500000){
 						movement.running = 0;
-						phaseVoltage = 2;
+						phaseVoltage = 3;
 						pid.on = 0;
 					}
 				}
 			}
 
 
-			if (TIM2->CNT - NRF_ReceiveTimestamp > 20000){
-				//	    		pid.target = 0;
-			}
-			if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
-				//	    		phaseVoltage = 0;
-				//	    		speed = 0;
-				if (BIBI_Mode == REMOTE_CONTROLLED){
-					pid.on = 0;
-					phaseVoltage = 0;
-				}
-			}
 
 
 
 			if (BIBI_Mode == REMOTE_CONTROLLED){
+
+				// If we haven't had a message in a second, turn off the motor
+				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
+					pid.on = 0;
+					phaseVoltage = 0;
+				}
+
+
+
+				// If we got a new message
 				if (NRF_DataReady()) {
 					NRF_GetData(buffer);
 					NRF_ReceiveTimestamp = TIM2->CNT;
@@ -572,9 +479,12 @@ int main(void) {
 					phaseVoltage = 5;
 					if (ABS(pid.target) > 45) phaseVoltage = 6;
 
+					// Reset speed if right shoulder button is pressed
 					if (buffer[6] & 0b01000000) speed = 0;
 				}
 			}
+
+
 			else {
 
 				if (NRF_DataReady()) {
@@ -582,30 +492,11 @@ int main(void) {
 					NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 					NRF_ReceiveTimestamp = TIM2->CNT;
 
-					if (buffer[0] == START_CUE && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE) && BIBI_Mode != BIBI_CONTROLLED){
-						if (buffer[3] == 1){
-							CUE_Start(1);
-						}
-						else if (buffer[3] == 2){
-							CUE_Start(2);
-						}
-						else if (buffer[3] == 4){
-							CUE_Start(3);
-						}
-						else if (buffer[3] == 8){
-							CUE_Start(4);
-						}
-					}
-
-#define CONTROL_BIBI_MAX_ANGLE 75.0f
-#define CONTROL_BIBI_MAX_POWER_ANGLE 90.0f
-
-					if (buffer[0] == CONTROL_BIBI && BIBI_NUMBER == 1){
-						pid.target = buffer[1] / 255.0f * CONTROL_BIBI_MAX_ANGLE * 2 - CONTROL_BIBI_MAX_ANGLE;
-						phaseVoltage = 5.0f + LIMIT(0, ABS(pid.target) / CONTROL_BIBI_MAX_POWER_ANGLE, 1.5f);
-						pid.on = 1;
-
-						BIBI_Mode = BIBI_CONTROLLED;
+					if (buffer[0] == START_CUE && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
+						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
+						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
+						if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
+						if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
 					}
 				}
 			}
@@ -618,9 +509,6 @@ int main(void) {
 				NRF_Send(buffer);
 				while (NRF_IsSending());
 			}
-
-
-			// pid.target = TIM2->CNT / 4000000 & 1 ? 45 : -45;
 
 
 			myData.a = diaboloPosition;
