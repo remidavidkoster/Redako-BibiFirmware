@@ -4,7 +4,7 @@
 #include "spi.h"
 
 #define mirf_ADDR_LEN  5
-#define mirf_CONFIG ((1<<EN_CRC) | (0<<CRCO))
+#define mirf_CONFIG ((1<<EN_CRC) | (1<<CRCO))
 
 
 // In sending mode.
@@ -109,23 +109,53 @@ void NRF_Init() {
 #define RF_DR_1MBPS      0x00
 #define RF_DR_2MBPS      0x08
 
+uint8_t bind_rx_tx_addr[] = {0xB5, 0xFC, 0x04, 0x00, 0xA2}; // bind addr
+
 
 // Sets the important registers in the MiRF module and powers the module
 // in receiving mode
 // NB: channel and payload must be set now.
 void NRF_Config() {
-	// Set RF channel
-	configRegister(RF_CH, channel);
 
-	// Set length of incoming payload
-	configRegister(RX_PW_P0, payload);
-	configRegister(RX_PW_P1, payload);
+	configRegister(CONFIG, 0x0C); // CRC enabled, 16-bit
+
 	configRegister(EN_AA, 0); // No auto ack?
-	configRegister(SETUP_RETR, 0B00000000); // No retransmits?
+
+	configRegister(EN_RXADDR, 0x3F); // Enable all RX pipes
+
+	configRegister(SETUP_AW, 0b00000011); // set 5 byte address width
+
+	configRegister(SETUP_RETR, 0); // Wait 4000us, up to 15 retries
+
+	configRegister(RF_CH, 0x27); // Set RF channel
+
+    configRegister(RF_SETUP, RF_DR_250KBPS | RF_PWR_0DBM); // Or 0x27?
+
+    configRegister(STATUS, 0x70); // Clear status bits 6, 5, 4
+
+    // configRegister(OBSERVE_TX, 0); // Datasheet says you can't write to this
+
+    // configRegister(CD, 0); // Datasheet says you can't write to this
+
+    configRegister(RX_ADDR_P2, 0xC3); // Sets RX Address 2 LSB to default value
+    configRegister(RX_ADDR_P3, 0xC4); // Sets RX Address 3 LSB to default value
+    configRegister(RX_ADDR_P4, 0xC5); // Sets RX Address 4 LSB to default value
+    configRegister(RX_ADDR_P5, 0xC6); // Sets RX Address 5 LSB to default value
+
+    configRegister(RX_PW_P0, 0x0A); // Set 10 bytes in data pipe 0
+    configRegister(RX_PW_P1, 0x0A); // Set 10 bytes in data pipe 1
+    configRegister(RX_PW_P2, 0x0A); // Set 10 bytes in data pipe 2
+    configRegister(RX_PW_P3, 0x0A); // Set 10 bytes in data pipe 3
+    configRegister(RX_PW_P4, 0x0A); // Set 10 bytes in data pipe 4
+    configRegister(RX_PW_P5, 0x0A); // Set 10 bytes in data pipe 5
+
+    setRADDR(bind_rx_tx_addr);
+    setTADDR(bind_rx_tx_addr);
+
+    // configRegister(FIFO_STATUS, 0); // Datasheet says you can't write to this
 
 
-//    configRegister(RF_SETUP, RF_DR_250KBPS | RF_PWR_0DBM);
-    configRegister(RF_SETUP, 0x27);
+
 	// Start receiver
 	powerUpRx();
 	flushRx();

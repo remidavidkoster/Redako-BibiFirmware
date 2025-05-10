@@ -30,18 +30,14 @@ void SystemClock_Config(void);
 /// Radio Stuff
 
 // NRF buffer
-#define MIN_PAYLOAD 4
-#define MAX_PAYLOAD 12
-#define MAX_CHANNEL 125
+#define PAYLOAD 0x0A
 
-uint8_t buffer[MAX_PAYLOAD];
 
-void configNRF(uint8_t chan, uint8_t psize) {
+uint8_t buffer[PAYLOAD];
+
+void configNRF() {
+	payload = 0x0A;
     NRF_Init();
-    setRADDR((uint8_t *)"TCMfx");   // RX address
-    setTADDR((uint8_t *)"TCMfx");   // Not needed, but initialized
-    payload = psize;
-    channel = chan;
     NRF_Config();
 }
 
@@ -733,29 +729,21 @@ float quinticPositionProfile(float currentTime, float rampTime, float cruiseTime
 
 
 
-
+uint32_t timestamp;
 uint8_t ch;
 uint8_t size;
 
 void sniffNRF() {
-    for (ch = 0; ch <= MAX_CHANNEL; ch++) {
-        for (size = MIN_PAYLOAD; size <= MAX_PAYLOAD; size++) {
-            configNRF(101, 4);
-            //printf("Scanning: CH=%u, PAYLOAD=%u\r\n", ch, size);
 
-            uint32_t start = HAL_GetTick();
-            while ((HAL_GetTick() - start) < 1000) {  // 1 second per combo
-                if (NRF_DataReady()) {
-                    NRF_GetData(buffer);
-                    //printf("Packet on CH %u [%u bytes]: ", ch, size);
-                    for (uint8_t i = 0; i < size; i++) {
-                        asm("nop");//printf("%02X ", buffer[i]);
-                    }
-                    //printf("\r\n");
-                }
-            }
-        }
-    }
+	if (NRF_DataReady()) {
+		timestamp = TIM2->CNT;
+		NRF_GetData(buffer);
+		//printf("Packet on CH %u [%u bytes]: ", ch, size);
+		for (uint8_t i = 0; i < size; i++) {
+			asm("nop");//printf("%02X ", buffer[i]);
+		}
+		//printf("\r\n");
+	}
 }
 
 
@@ -786,10 +774,11 @@ int main(void) {
 	MX_USART2_UART_Init();
 	MX_TIM2_Init();
 
+	HAL_TIM_Base_Start(&htim2);
 
 
 
-//	configNRF(10);
+	configNRF();
 
 
 	while (1)  {
