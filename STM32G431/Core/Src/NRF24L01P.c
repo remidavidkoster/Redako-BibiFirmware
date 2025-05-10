@@ -4,7 +4,7 @@
 #include "spi.h"
 
 #define mirf_ADDR_LEN  5
-#define mirf_CONFIG ((1<<EN_CRC) | (0<<CRCO))
+uint8_t mirf_CONFIG = ((1<<EN_CRC) | (0<<CRCO));
 
 
 // In sending mode.
@@ -97,10 +97,13 @@ void NRF_Init() {
 	csnHigh();
 }
 
+
+
+
 // Sets the important registers in the MiRF module and powers the module
 // in receiving mode
 // NB: channel and payload must be set now.
-void NRF_Config() {
+void NRF_Config(uint8_t rfSetup) {
 	// Set RF channel
 	configRegister(RF_CH, channel);
 
@@ -109,7 +112,7 @@ void NRF_Config() {
 	configRegister(RX_PW_P1, payload);
 	configRegister(EN_AA, 0); // No auto ack?
 	configRegister(SETUP_RETR, 0B00000000); // No retransmits?
-	configRegister(RF_SETUP, 0B00001000);
+	configRegister(RF_SETUP, rfSetup);
 	// Start receiver
 	powerUpRx();
 	flushRx();

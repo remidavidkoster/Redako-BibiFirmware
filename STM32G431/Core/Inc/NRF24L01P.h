@@ -4,6 +4,18 @@
 #include "main.h"
 #include "stdbool.h"
 
+extern uint8_t mirf_CONFIG;
+
+// Constants for RF power
+#define RF_PWR_NEG18DBM  0x00
+#define RF_PWR_NEG12DBM  0x02
+#define RF_PWR_NEG6DBM   0x04
+#define RF_PWR_0DBM      0x06
+
+// Constants for data rate
+#define RF_DR_250KBPS    0x20
+#define RF_DR_1MBPS      0x00
+#define RF_DR_2MBPS      0x08
 
 /* Memory Map */
 #define CONFIG 0x00
@@ -106,7 +118,7 @@ extern "C" {
 
 uint8_t softSpiTransfer(uint8_t working);
 void NRF_Init();
-void NRF_Config();
+void NRF_Config(uint8_t rfSetup);
 void NRF_Send(uint8_t *value);
 void setRADDR(uint8_t * adr);
 void setTADDR(uint8_t * adr);
