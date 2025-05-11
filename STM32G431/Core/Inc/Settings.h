@@ -40,6 +40,7 @@ void CUE_Start(uint8_t BIBI_NUMBER, uint32_t cue) {
 			if (cue == 1) {
 				startMovement((struct MovementStep){LEFT, 0.4, 45, 0.6, 45});
 				queMovement((struct MovementStep){LEFT, 0.3, 30, 0.3, 30}, 20);
+				queMovement((struct MovementStep){LEFT, 0.3, 30, 0.3, 30}, 20);
 			}
 			if (cue == 2);
 			if (cue == 3);
