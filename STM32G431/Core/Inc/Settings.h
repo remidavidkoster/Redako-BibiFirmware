@@ -38,15 +38,12 @@ void CUE_Start(uint8_t BIBI_NUMBER, uint32_t cue) {
 		lastCueStarted = cue;
 		if (BIBI_NUMBER == 1) {
 			if (cue == 1) {
-				queueMovement((struct MovementStep){LEFT, 0.3, 45, 0.3, 45}, 20);
-				queueMovement((struct MovementStep){LEFT, 0.3, 60, 0.3, 60}, 20);
-				queueMovement((struct MovementStep){LEFT, 0.3, 45, 0.3, 45}, 20);
-				queueMovement((struct MovementStep){RIGHT, 0.3, 45, 0.3, 45}, 20);
-				queueMovement((struct MovementStep){RIGHT, 0.6, 45, 0.6, 45}, 20);
-				queueMovement((struct MovementStep){LEFT, 0.3, 30, 0.3, 30}, 20);
-				queueMovement((struct MovementStep){RIGHT, 0.5, 30, 0.3, 30}, 40);
-				queueMovement((struct MovementStep){LEFT, 0.3, 30, 0.3, 30}, 20);
-				queueMovement((struct MovementStep){RIGHT, 0.5, 30, 0.3, 30}, 40);
+				queueMovement((struct MovementStep){LEFT, 3.0, 25, 0.6, 25}, 30);
+				queueMovement((struct MovementStep){RIGHT, 1.5, 60, 0.5, 60}, 30);
+				queueMovement((struct MovementStep){LEFT, 1.5, 60, 0.5, 60}, 30);
+				queueMovement((struct MovementStep){RIGHT, 0.2, 50, 0.1, 50}, 30);
+				queueMovement((struct MovementStep){LEFT, 0.2, 50, 0.2, 50}, 30);
+
 			}
 			if (cue == 2);
 			if (cue == 3);
