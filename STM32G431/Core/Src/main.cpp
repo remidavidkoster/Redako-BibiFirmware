@@ -396,22 +396,22 @@ int main(void) {
 
 
 			// If we still have cued movements, and there's currently none running
-			if (quedMovementCount && !movement.running){
+			if (queuedMovementCount && !movement.running){
 
 				// If it's time for the next one
-				if (TIM2->CNT > quedMovements[0].startTime){
+				if (TIM2->CNT > queuedMovements[0].startTime){
 
 					// Start next cued movement
-					startMovement(quedMovements[0]);
+					startMovement(queuedMovements[0]);
 
 					// Move cues down a row
-				    memmove(&quedMovements[0], &quedMovements[1], sizeof(struct MovementStep) * (MAX_QUEUES - 1));
+				    memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
 
 				    // Zero out the last element
-				    memset(&quedMovements[MAX_QUEUES - 1], 0, sizeof(struct MovementStep));
+				    memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
 
 				    // Decrement qued movement counter
-				    quedMovementCount--;
+				    queuedMovementCount--;
 				}
 			}
 
