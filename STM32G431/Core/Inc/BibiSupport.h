@@ -23,15 +23,20 @@ void RGB_Set(float r, float g, float b){
 }
 
 // Voltage thresholds for color transitions
-#define VBAT_MIN_VOLTAGE   3.2f  // Red
-#define VBAT_MID_VOLTAGE   3.7f  // Green
+#define VBAT_MIN_VOLTAGE   3.4f  // Red
+#define VBAT_MID_VOLTAGE   3.75f  // Green
 #define VBAT_MAX_VOLTAGE   4.2f  // Blue
+
+
+#define BAT_SHUTDOWN_VOLTAGE 3.4f
+
+
 
 void BAT_VoltageToRGB(float voltage) {
 	float r = 0.0f, g = 0.0f, b = 0.0f;
 
 	if (voltage == 0) {
-		RGB_Set(r, g, b);
+		RGB_Set(0, 0, 0);
 		return;
 	}
 
@@ -94,6 +99,13 @@ void BAT_Update(){
 }
 
 
+// Low battery shut down
+
+void BAT_CheckLowShutdown(){
+	if (BAT.voltage < BAT_SHUTDOWN_VOLTAGE) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+}
+
+
 
 /// Charge stuff
 
@@ -103,7 +115,7 @@ void CHG_RunLogic(){
 	CHG.standby = !HAL_GPIO_ReadPin(STDBY_GPIO_Port, STDBY_Pin);
 	CHG.charging = !HAL_GPIO_ReadPin(CHRG_GPIO_Port, CHRG_Pin);
 	CHG.plugged = HAL_GPIO_ReadPin(VBUS_PRESENT_GPIO_Port, VBUS_PRESENT_Pin);
-	CHG.enabled = BAT.voltage > 2.5f;
+	CHG.enabled = BAT.voltage > 2.75f;
 
 	// Charge enable logic
 	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)(CHG.plugged && CHG.enabled));

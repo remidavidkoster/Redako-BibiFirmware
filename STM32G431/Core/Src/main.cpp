@@ -342,7 +342,7 @@ int main(void) {
 
 			// Low battery shut down
 			if (TIM2->CNT > 1000000){
-				if (BAT.voltage < 3.0f) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+				BAT_CheckLowShutdown();
 			}
 
 			// Button shut down
