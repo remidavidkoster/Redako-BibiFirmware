@@ -360,12 +360,11 @@ int main(void) {
 			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
 			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
 
-			// update the filter, which computes orientation
-			filter.updateIMU(imu_data.gyroZerod.x, imu_data.gyroZerod.y, imu_data.gyroZerod.z, imu_data.accel.x, imu_data.accel.y, imu_data.accel.z);
+			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
+			filter.updateIMU(imu_data.gyroZerod.z, -imu_data.gyroZerod.x, -imu_data.gyroZerod.y, imu_data.accel.z, -imu_data.accel.x, -imu_data.accel.y);
 
-
-			// Assuming imu_data.angle is in [0, 360)
-			madgwick.currentAngle = (filter.getRoll() < 0) ? filter.getPitch() - 90.0f : 90.0f - filter.getPitch();
+			// Calculate the roll angle. Down is 90 degrees (on hardware V1.0). Subtract this for now.
+			madgwick.currentAngle = filter.getRoll() - 90.0f < -180.0f ? filter.getRoll() + 270.0f : filter.getRoll() - 90.0f;
 			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
 			madgwick.anglePrev = madgwick.currentAngle;
 
