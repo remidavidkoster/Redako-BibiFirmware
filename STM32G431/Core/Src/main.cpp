@@ -46,7 +46,8 @@ ControlData txData;
 ControlData rxData;
 
 #define CONTROL_BIBI 10
-#define START_CUE 14
+#define REMOTE_V1 14
+#define REMOTE_V2 23
 
 #define MODE_TEST 150
 #define MODE_FIRE 200
@@ -525,11 +526,14 @@ int main(void) {
 					NRF_ReceiveTimestamp = TIM2->CNT;
 
 
-					if (buffer[0] == START_CUE && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
+					if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
 						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
 						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
 						if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
 						if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
+
+						// Shut down Bibi if all buttons are pressed at once
+						if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 					}
 				}
 			}
