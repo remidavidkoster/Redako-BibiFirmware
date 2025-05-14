@@ -394,6 +394,23 @@ int main(void) {
 
 
 
+
+			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
+			static int moved = 1;
+			if (!moved && TIM2->CNT > 15000000){
+				moved = 1;
+				queueMovement((struct MovementStep){LEFT,  0.5, 30, 0.5, 30}, 0);
+				queueMovement((struct MovementStep){RIGHT, 0.5, 60, 0.5, 60}, 10);
+				queueMovement((struct MovementStep){LEFT,  0.5, 30, 0.5, 30}, 20);
+				queueMovement((struct MovementStep){RIGHT, 0.5, 60, 0.5, 60}, 20);
+				queueMovement((struct MovementStep){LEFT,  0.5, 30, 0.5, 30}, 20);
+				queueMovement((struct MovementStep){RIGHT, 0.5, 60, 0.5, 60}, 20);
+			}
+
+
+
+
+
 			// If we still have cued movements, and there's currently none running
 			if (queuedMovementCount && !movement.running){
 
@@ -440,9 +457,19 @@ int main(void) {
 				}
 
 				if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
-					movement.step = STOPPING;
-					pid.target = 0;
-					movement.stoppingTimestamp = TIM2->CNT;
+
+					// If another movement is due, stop this one right away
+					if (queuedMovementCount && TIM2->CNT > queuedMovements[0].startTime){
+						movement.running = 0;
+						movement.endTimestamp = TIM2->CNT;
+					}
+
+					// Otherwise move to the 'stopping' step, where it waits for half a second until it stabilizes
+					else {
+						movement.step = STOPPING;
+						pid.target = 0;
+						movement.stoppingTimestamp = TIM2->CNT;
+					}
 				}
 
 				if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
