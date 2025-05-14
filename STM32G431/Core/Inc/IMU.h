@@ -82,7 +82,6 @@ float calculate_standard_deviation(float *data, int num_samples) {
 
 #define STABILITY_THRESHOLD 0.003f  // Threshold for accelerometer standard deviation
 #define NUM_SAMPLES 100          // Number of samples to collect for both accelerometer and gyro
-#define GRAVITY 9.81f             // Gravity constant in m/s^2
 
 float accel_x_stddev;
 float accel_y_stddev;
@@ -90,67 +89,83 @@ float accel_z_stddev;
 
 
 void waitForStableGetGyroOffsets(){
+	// Initialize rolling buffers for accelerometer and gyro data
+	float accel_x_buffer[NUM_SAMPLES] = {0};
+	float accel_y_buffer[NUM_SAMPLES] = {0};
+	float accel_z_buffer[NUM_SAMPLES] = {0};
+	float gyro_x_buffer[NUM_SAMPLES] = {0};
+	float gyro_y_buffer[NUM_SAMPLES] = {0};
+	float gyro_z_buffer[NUM_SAMPLES] = {0};
+
+	// Buffer position tracker (index of the next sample to be replaced)
+	int buffer_pos = 0;
+
+	// Counter to track how many samples we've collected so far
+	int samples_collected = 0;
+
+	// Main loop
 	while (1) {
-		// Arrays to store accelerometer and gyro samples
-		float accel_x_samples[NUM_SAMPLES] = {0};
-		float accel_y_samples[NUM_SAMPLES] = {0};
-		float accel_z_samples[NUM_SAMPLES] = {0};
-		float gyro_x_samples[NUM_SAMPLES] = {0};
-		float gyro_y_samples[NUM_SAMPLES] = {0};
-		float gyro_z_samples[NUM_SAMPLES] = {0};
 
-		// Collect NUM_SAMPLES samples of accelerometer and gyro data
-		for (int i = 0; i < NUM_SAMPLES; i++) {
-			imu_data.accel = icm42670_read_accel(&imu); // Replace with actual accel read function
-			imu_data.gyro = icm42670_read_gyro(&imu);   // Replace with actual gyro read function
+		// Read current IMU data
+		imu_data.accel = icm42670_read_accel(&imu);
+		imu_data.gyro = icm42670_read_gyro(&imu);
 
-			// Store the accelerometer and gyro samples
-			accel_x_samples[i] = imu_data.accel.x;
-			accel_y_samples[i] = imu_data.accel.y;
-			accel_z_samples[i] = imu_data.accel.z;
-			gyro_x_samples[i] = imu_data.gyro.x;
-			gyro_y_samples[i] = imu_data.gyro.y;
-			gyro_z_samples[i] = imu_data.gyro.z;
+		// Update the rolling buffers at the current position
+		accel_x_buffer[buffer_pos] = imu_data.accel.x;
+		accel_y_buffer[buffer_pos] = imu_data.accel.y;
+		accel_z_buffer[buffer_pos] = imu_data.accel.z;
+		gyro_x_buffer[buffer_pos] = imu_data.gyro.x;
+		gyro_y_buffer[buffer_pos] = imu_data.gyro.y;
+		gyro_z_buffer[buffer_pos] = imu_data.gyro.z;
 
-			// Optional: Add a small delay between samples if necessary
-			HAL_Delay(10);
-
-			// Check for button shutdown
-			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-
-			// And turn off after 2 minutes of not having become stable
-			if (TIM2->CNT > 120000000) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+		// Increment samples collected (up to NUM_SAMPLES)
+		if (samples_collected < NUM_SAMPLES) {
+			samples_collected++;
 		}
 
-		// Calculate the standard deviation for each axis of the accelerometer
-		accel_x_stddev = calculate_standard_deviation(accel_x_samples, NUM_SAMPLES);
-		accel_y_stddev = calculate_standard_deviation(accel_y_samples, NUM_SAMPLES);
-		accel_z_stddev = calculate_standard_deviation(accel_z_samples, NUM_SAMPLES);
+		// Move to the next position in the buffer (circular)
+		buffer_pos = (buffer_pos + 1) % NUM_SAMPLES;
 
-		// If the standard deviation of all axes is below the threshold, the accelerometer is stable
-		if (accel_x_stddev < STABILITY_THRESHOLD && accel_y_stddev < STABILITY_THRESHOLD && accel_z_stddev < STABILITY_THRESHOLD) {
-			//printf("Accelerometer is stable. Proceeding to gyro offset calculation...\n");
 
-			// Calculate the average of the gyro readings
-			float sum_gyro[3] = {0.0f, 0.0f, 0.0f};
-			for (int i = 0; i < NUM_SAMPLES; i++) {
-				sum_gyro[0] += gyro_x_samples[i];
-				sum_gyro[1] += gyro_y_samples[i];
-				sum_gyro[2] += gyro_z_samples[i];
+		// Check for button shutdown
+		if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) {
+			HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+		}
+
+		// Turn off after 2 minutes of not having become stable
+		if (TIM2->CNT > 120000000) {
+			HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+		}
+
+
+		// Only check for stability if we have enough samples
+		if (samples_collected == NUM_SAMPLES) {
+			// Calculate the standard deviation for each axis of the accelerometer
+			accel_x_stddev = calculate_standard_deviation(accel_x_buffer, NUM_SAMPLES);
+			accel_y_stddev = calculate_standard_deviation(accel_y_buffer, NUM_SAMPLES);
+			accel_z_stddev = calculate_standard_deviation(accel_z_buffer, NUM_SAMPLES);
+
+			// Check if accelerometer readings are stable
+			if (accel_x_stddev < STABILITY_THRESHOLD && accel_y_stddev < STABILITY_THRESHOLD && accel_z_stddev < STABILITY_THRESHOLD) {
+
+				// Calculate gyro offsets using the current buffer
+				float sum_gyro[3] = {0.0f, 0.0f, 0.0f};
+				for (int i = 0; i < NUM_SAMPLES; i++) {
+					sum_gyro[0] += gyro_x_buffer[i];
+					sum_gyro[1] += gyro_y_buffer[i];
+					sum_gyro[2] += gyro_z_buffer[i];
+				}
+
+				gyro_offsets[0] = sum_gyro[0] / NUM_SAMPLES;
+				gyro_offsets[1] = sum_gyro[1] / NUM_SAMPLES;
+				gyro_offsets[2] = sum_gyro[2] / NUM_SAMPLES;
+
+				break; // Exit once we've calculated the gyro offsets
 			}
-
-			gyro_offsets[0] = sum_gyro[0] / NUM_SAMPLES;
-			gyro_offsets[1] = sum_gyro[1] / NUM_SAMPLES;
-			gyro_offsets[2] = sum_gyro[2] / NUM_SAMPLES;
-
-			//printf("Gyro Offsets: X: %f, Y: %f, Z: %f\n", gyro_offsets[0], gyro_offsets[1], gyro_offsets[2]);
-			break;  // Exit the loop since we have successfully calculated the gyro offsets
-		} else {
-			//printf("Accelerometer is not stable. Retrying...\n");
 		}
 
-		// Optional: Add a small delay before trying again if needed
-		// usleep(10000); // Sleep for 10ms (if required)
+		// Small delay between samples
+		HAL_Delay(1);
 	}
 }
 
