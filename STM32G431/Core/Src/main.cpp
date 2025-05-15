@@ -33,17 +33,10 @@ uint8_t BIBI_Number;
 // NRF buffer
 #define TCMPAYLOADSIZE 4
 
-typedef struct __attribute__((packed)) {
-	uint8_t what;
-	uint8_t who;
-	uint8_t maxSpeed;          // per 0.01
-	uint8_t accelerationRatio; // per 0.01
 
-} ControlData;
 
 uint8_t buffer[SYMAPAYLOADSIZE];
-ControlData txData;
-ControlData rxData;
+
 
 #define CONTROL_BIBI 10
 #define REMOTE_V1 14
@@ -83,8 +76,8 @@ uint32_t NRF_ReceiveInterval;
 
 
 typedef enum {
-    CUE_CONTROLLED,
-    REMOTE_CONTROLLED
+	CUE_CONTROLLED,
+	REMOTE_CONTROLLED
 } BIBI_Mode_t;
 
 BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
@@ -96,12 +89,81 @@ BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
 
 
 
+
+
+uint8_t txData[6];
+uint8_t rxData[6];
+uint32_t lastRawAngle = 0;
+
+
+float velocity=0.0f;
+float angle_prev=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
+float angleFull=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
+
+float zero_electric_angle;
+
+uint32_t angle_prev_ts=0; // timestamp of last call to getAngle, used for velocity
+float vel_angle_prev=0.0f; // angle at last call to getVelocity, used for velocity
+uint32_t vel_angle_prev_ts=0; // last velocity calculation timestamp
+int32_t full_rotations=0; // full rotation tracking
+int32_t vel_full_rotations=0; // previous full rotation value for velocity calculation
+
+const int32_t sensor_direction = 1;
+
+#define _2PI 6.28318530718f
+
+
+void ENC_Update(){
+	HAL_SPI_DeInit(&hspi2);
+	hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;   // or HIGH
+	hspi2.Init.CLKPhase    = SPI_PHASE_2EDGE;    // or 2EDGE
+	HAL_SPI_Init(&hspi2);
+
+	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
+
+	txData[0] = 0b1010 << 4;
+	txData[1] = 0x03;
+
+	HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
+
+	lastRawAngle = 0;
+
+	// Extract bits from rawData1 and rawData2
+	lastRawAngle |= ((uint32_t)(rxData[0 + 2]) << 13);  // Upper 8 bits (ANGLE[20:13])
+	lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
+	lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
+
+	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
+
+	float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
+	//	    angle_prev_ts = TIM6->CNT;
+	float d_angle = val - angle_prev;
+	// if overflow happened track it as full rotation
+	if(abs(d_angle) > (0.8f*_2PI) ) full_rotations += ( d_angle > 0 ) ? -1 : 1;
+	angle_prev = val;
+
+	angleFull = (float)full_rotations * _2PI + angle_prev;
+
+	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
+	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 /// PID Stuff
 
 typedef struct {
-	float p;
-	float d;
-
+	float p, i, d;
 	float error;
 	float prev_error;
 	float derivative;
@@ -120,16 +182,38 @@ typedef struct {
 } PIDController;
 
 
-volatile PIDController pid = {
+volatile PIDController pidSpeed = {
 		.p = 0.000002f,
+		.i = 0.0f,
 		.d = 0.01f,
-		.alpha = 0.001f,  // Set this based on how much filtering you want
+		.alpha = 0.001f,
 		.limit = 2.0f,
 		.target = 0.0f,
 };
 
+volatile PIDController pidPosition = {
+		.p = -5.0f,
+		.i = 0.0f,
+		.d = 0.0f,
+		.alpha = 0.001f,
+		.limit = 5.0f,
+		.target = 0.0f,
+		.on = 1
+};
+
+
+
+
+
+
+
+
+
+
+
+
 volatile float speed;
-float electricalAngle;
+float electricalAngleTarget, electricalAngle;
 float motorAngleFull;
 float diaboloAngleFull;
 float diaboloPosition;
@@ -142,46 +226,77 @@ float SPEED_ALPHA = 0.01f;
 float ACCEL_ALPHA = 0.005f;
 
 
-/// Main 10kHz pid loop
+/// Main 10kHz pidSpeed loop
+
+
+
+float runPID(volatile PIDController *pid, float currentValue) {
+	pid->error = currentValue - pid->target;
+
+	if (pid->target != pid->lastTarget) {
+		pid->prev_error = pid->error;
+		pid->lastTarget = pid->target;
+	}
+
+	// Derivative with low-pass filter
+	pid->derivative = pid->alpha * (pid->error - pid->prev_error) * pid->d + (1.0f - pid->alpha) * pid->derivative;
+
+	// PID output (currently PD only)
+	pid->output = pid->p * pid->error + pid->derivative;
+
+	// Clamp output
+	pid->output = LIMIT(-pid->limit, pid->output, pid->limit);
+
+	// Store error for next iteration
+	pid->prev_error = pid->error;
+
+	return pid->output;
+}
+
+
+
+
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if (htim->Instance == TIM6) {
 
-		pid.error = madgwick.angleFull - pid.target;
+		if (pidSpeed.on){
+			speed += runPID(&pidSpeed, madgwick.angleFull);
 
-		if (pid.target != pid.lastTarget){
-			pid.prev_error = pid.error;
-			pid.lastTarget = pid.target;
-		}
-
-		// Derivative with low-pass filter
-		pid.derivative = pid.alpha * (pid.error - pid.prev_error) * pid.d + (1 - pid.alpha) * pid.derivative;
-
-		// PID output
-		pid.output = pid.p * pid.error + pid.derivative;// + pid.integral;
-
-		pid.output = LIMIT(-pid.limit, pid.output, pid.limit);
-
-		pid.prev_error = pid.error;
-
-		//phaseVoltage = pid.output;
-
-		if (pid.on){
-			speed += pid.output;
-
-			speed = LIMIT(-pid.limit, speed, pid.limit);
+			speed = LIMIT(-pidSpeed.limit, speed, pidSpeed.limit);
 
 			// Speed should be in meters per second
-
-			electricalAngle += speed * METERS2RAD * POLE_PAIRS / 10000.0f;
+			electricalAngleTarget += speed * METERS2RAD * POLE_PAIRS / 10000.0f;
 		}
 		else {
 			speed = 0;
 		}
 
-		motorAngleFull = electricalAngle / POLE_PAIRS * RAD2DEG;
+		motorAngleFull = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
+
+
+
+
+
+		pidPosition.target = electricalAngleTarget;
+
+		phaseVoltage = runPID(&pidPosition, angleFull * POLE_PAIRS);
+
+		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
 		setPhaseVoltage(phaseVoltage, electricalAngle);
+
+
+
+
+
+
+
+
+
+
+
+
 	}
 }
 
@@ -191,6 +306,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 /// Timing stuff
 
 unsigned long microsPerReading, microsPrevious, microsUsed;
+
+
+
+
+
+
 
 
 
@@ -284,14 +405,14 @@ int main(void) {
 
 
 	if (BIBI_Mode == REMOTE_CONTROLLED) {
-	    configNRFSyma();
-	    while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
+		configNRFSyma();
+		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
 	} else {
-	    configNRFTCMfx();
+		configNRFTCMfx();
 
-		pid.on = 0;
+		pidSpeed.on = 0;
 		phaseVoltage = 2;
-		pid.target = 0;
+		pidSpeed.target = 0;
 	}
 
 
@@ -311,6 +432,19 @@ int main(void) {
 
 	// Wait until stable and get gyro offsets
 	waitForStableGetGyroOffsets();
+
+
+	// Get electrical angle offset
+	setPhaseVoltage(5.65, _3PI_2);
+	HAL_Delay(4000);
+	ENC_Update();
+	zero_electric_angle = _normalizeAngle((float)(POLE_PAIRS * angle_prev));
+	setPhaseVoltage(0, _3PI_2);
+
+
+
+
+
 
 
 
@@ -370,15 +504,15 @@ int main(void) {
 			madgwick.anglePrev = madgwick.currentAngle;
 
 			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
-			//			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
-			//			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
+			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
+			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
 
 			// Compute total angle
 			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
 
 
 
-			motorAngleFull = electricalAngle / POLE_PAIRS * RAD2DEG;
+			motorAngleFull = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
 
 			// Compute the angle the diabolo has made from its startup position
 			diaboloAngleFull = motorAngleFull + madgwick.angleFull;
@@ -422,13 +556,13 @@ int main(void) {
 					startMovement(queuedMovements[0]);
 
 					// Move cues down a row
-				    memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
+					memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
 
-				    // Zero out the last element
-				    memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
+					// Zero out the last element
+					memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
 
-				    // Decrement qued movement counter
-				    queuedMovementCount--;
+					// Decrement qued movement counter
+					queuedMovementCount--;
 				}
 			}
 
@@ -439,9 +573,9 @@ int main(void) {
 				movement.running = 1;
 				movement.step = ACCELERATING;
 				movement.startOffset = diaboloPosition;
-                pid.target = -movement.accAngle * movement.direction;
+				pidSpeed.target = -movement.accAngle * movement.direction;
 				phaseVoltage = 5;
-				pid.on = 1;
+				pidSpeed.on = 1;
 			}
 
 			if (movement.running) {
@@ -449,12 +583,12 @@ int main(void) {
 
 				if (movement.step == ACCELERATING && positionDelta > movement.accDistance) {
 					movement.step = COASTING;
-					pid.target = -2 * movement.direction;
+					pidSpeed.target = -2 * movement.direction;
 				}
 
 				if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
 					movement.step = DECELERATING;
-					pid.target = movement.decAngle * movement.direction;
+					pidSpeed.target = movement.decAngle * movement.direction;
 				}
 
 				if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
@@ -468,7 +602,7 @@ int main(void) {
 					// Otherwise move to the 'stopping' step, where it waits for half a second until it stabilizes
 					else {
 						movement.step = STOPPING;
-						pid.target = 0;
+						pidSpeed.target = 0;
 						movement.stoppingTimestamp = TIM2->CNT;
 					}
 				}
@@ -476,7 +610,7 @@ int main(void) {
 				if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
 					movement.running = 0;
 					phaseVoltage = 2;
-					pid.on = 0;
+					pidSpeed.on = 0;
 					movement.endTimestamp = TIM2->CNT;
 				}
 			}
@@ -489,7 +623,7 @@ int main(void) {
 
 				// If we haven't had a message in a second, turn off the motor
 				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
-					pid.on = 0;
+					pidSpeed.on = 0;
 					phaseVoltage = 0;
 				}
 
@@ -499,10 +633,10 @@ int main(void) {
 				if (NRF_DataReady()) {
 					NRF_GetData(buffer);
 					NRF_ReceiveTimestamp = TIM2->CNT;
-					pid.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
-					pid.on = 1;
+					pidSpeed.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
+					pidSpeed.on = 1;
 					phaseVoltage = 5;
-					if (ABS(pid.target) > 45) phaseVoltage = 6;
+					if (ABS(pidSpeed.target) > 45) phaseVoltage = 6;
 
 					// Reset speed if right shoulder button is pressed
 					if (buffer[6] & 0b01000000) speed = 0;
@@ -537,6 +671,9 @@ int main(void) {
 					}
 				}
 			}
+
+
+			ENC_Update();
 
 
 			// Debug send command
