@@ -183,7 +183,7 @@ typedef struct {
 
 
 volatile PIDController pidSpeed = {
-		.p = 0.000002f,
+		.p = 0.000004f,
 		.i = 0.0f,
 		.d = 0.01f,
 		.alpha = 0.001f,
@@ -192,11 +192,11 @@ volatile PIDController pidSpeed = {
 };
 
 volatile PIDController pidPosition = {
-		.p = -5.0f,
+		.p = 7.5f,
 		.i = 0.0f,
-		.d = 0.0f,
+		.d = 5000.0f,
 		.alpha = 0.001f,
-		.limit = 5.0f,
+		.limit = 6.5f,
 		.target = 0.0f,
 		.on = 1
 };
@@ -253,8 +253,8 @@ float runPID(volatile PIDController *pid, float currentValue) {
 	return pid->output;
 }
 
-
-
+// Clip PID to 1/8 turn
+#define PID_CLIP (TWO_PI / 8.0f * POLE_PAIRS)
 
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
@@ -274,13 +274,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
 		motorAngleFull = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
 
-
+		if (electricalAngleTarget - angleFull * POLE_PAIRS > PID_CLIP) electricalAngleTarget = angleFull * POLE_PAIRS + PID_CLIP;
+		if (angleFull * POLE_PAIRS - electricalAngleTarget > PID_CLIP) electricalAngleTarget = angleFull * POLE_PAIRS - PID_CLIP;
 
 
 
 		pidPosition.target = electricalAngleTarget;
 
-		phaseVoltage = runPID(&pidPosition, angleFull * POLE_PAIRS);
+		phaseVoltage = -runPID(&pidPosition, angleFull * POLE_PAIRS);
 
 		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
@@ -531,15 +532,15 @@ int main(void) {
 
 
 			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
-			static int moved = 1;
+			static int moved = 0;
 			if (!moved && TIM2->CNT > 15000000){
 				moved = 1;
-				queueMovement((struct MovementStep){LEFT,  0.5, 30, 0.5, 30}, 0);
-				queueMovement((struct MovementStep){RIGHT, 0.5, 60, 0.5, 60}, 10);
-				queueMovement((struct MovementStep){LEFT,  0.5, 30, 0.5, 30}, 20);
-				queueMovement((struct MovementStep){RIGHT, 0.5, 60, 0.5, 60}, 20);
-				queueMovement((struct MovementStep){LEFT,  0.5, 30, 0.5, 30}, 20);
-				queueMovement((struct MovementStep){RIGHT, 0.5, 60, 0.5, 60}, 20);
+				queueMovement((struct MovementStep){LEFT,  0.8, 90, 0.5, 90}, 0);
+				queueMovement((struct MovementStep){RIGHT, 0.8, 90, 0.5, 90}, 0);
+				queueMovement((struct MovementStep){LEFT,  0.8, 90, 0.5, 90}, 0);
+				queueMovement((struct MovementStep){RIGHT, 0.8, 90, 0.5, 90}, 0);
+				queueMovement((struct MovementStep){LEFT,  0.8, 90, 0.5, 90}, 0);
+				queueMovement((struct MovementStep){RIGHT, 0.8, 90, 0.5, 90}, 0);
 			}
 
 
@@ -685,10 +686,10 @@ int main(void) {
 			}
 
 
-			myData.a = filter.getRoll();
-			myData.b = filter.getPitch();
-			myData.c = filter.getYaw();
-			myData.d = madgwick.currentAngle;
+			myData.a = phaseVoltage;
+			myData.b = madgwick.currentAngle;
+			myData.c = 0;
+			myData.d = 0;
 			myData.e = 0;
 
 			sendFloats(&myData);
