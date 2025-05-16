@@ -310,7 +310,7 @@ unsigned long microsPerReading, microsPrevious, microsUsed;
 
 
 
-
+#define ANGLE_PD_COMP_FACTOR 1.3333333333f
 
 
 
@@ -535,12 +535,12 @@ int main(void) {
 			static int moved = 0;
 			if (!moved && TIM2->CNT > 15000000){
 				moved = 1;
-				queueMovement((struct MovementStep){LEFT,  0.8, 90, 0.5, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 0.8, 90, 0.5, 90}, 0);
-				queueMovement((struct MovementStep){LEFT,  0.8, 90, 0.5, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 0.8, 90, 0.5, 90}, 0);
-				queueMovement((struct MovementStep){LEFT,  0.8, 90, 0.5, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 0.8, 90, 0.5, 90}, 0);
+				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
+				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
+				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
+				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
+				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
+				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
 			}
 
 
@@ -574,8 +574,7 @@ int main(void) {
 				movement.running = 1;
 				movement.step = ACCELERATING;
 				movement.startOffset = diaboloPosition;
-				pidSpeed.target = -movement.accAngle * movement.direction;
-				phaseVoltage = 5;
+				pidSpeed.target = LIMIT(-90, -movement.accAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
 				pidSpeed.on = 1;
 			}
 
@@ -589,7 +588,7 @@ int main(void) {
 
 				if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
 					movement.step = DECELERATING;
-					pidSpeed.target = movement.decAngle * movement.direction;
+					pidSpeed.target = LIMIT(-90, movement.decAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
 				}
 
 				if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
@@ -610,7 +609,6 @@ int main(void) {
 
 				if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
 					movement.running = 0;
-					phaseVoltage = 2;
 					pidSpeed.on = 0;
 					movement.endTimestamp = TIM2->CNT;
 				}
