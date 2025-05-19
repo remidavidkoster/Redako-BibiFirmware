@@ -1,0 +1,13 @@
+../Core/lwip/src/apps/snmp/snmp_traps.c:112:1:snmp_trap_dst_enable	2
+../Core/lwip/src/apps/snmp/snmp_traps.c:127:1:snmp_trap_dst_ip_set	3
+../Core/lwip/src/apps/snmp/snmp_traps.c:140:1:snmp_set_auth_traps_enabled	1
+../Core/lwip/src/apps/snmp/snmp_traps.c:150:1:snmp_get_auth_traps_enabled	1
+../Core/lwip/src/apps/snmp/snmp_traps.c:173:1:snmp_send_trap	9
+../Core/lwip/src/apps/snmp/snmp_traps.c:241:1:snmp_send_trap_generic	1
+../Core/lwip/src/apps/snmp/snmp_traps.c:252:1:snmp_send_trap_specific	1
+../Core/lwip/src/apps/snmp/snmp_traps.c:262:1:snmp_coldstart_trap	1
+../Core/lwip/src/apps/snmp/snmp_traps.c:272:1:snmp_authfail_trap	2
+../Core/lwip/src/apps/snmp/snmp_traps.c:280:1:snmp_trap_varbind_sum	3
+../Core/lwip/src/apps/snmp/snmp_traps.c:314:1:snmp_trap_header_sum	2
+../Core/lwip/src/apps/snmp/snmp_traps.c:370:1:snmp_trap_varbind_enc	4
+../Core/lwip/src/apps/snmp/snmp_traps.c:393:1:snmp_trap_header_enc	17

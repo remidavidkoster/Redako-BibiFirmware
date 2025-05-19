@@ -1,0 +1,9 @@
+../Core/Src/usb_config.c:132:30:USB_GetDeviceDescriptor	4	static
+../Core/Src/usb_config.c:136:16:USB_GetConfigDescriptor	16	static
+../Core/Src/usb_config.c:141:17:USB_GetString	16	static
+../Core/Src/usb_config.c:164:16:USB_GetOSDescriptor	16	static
+../Core/Src/usb_config.c:168:6:USB_ConfigureEndpoints	48	static
+../Core/Src/usb_config.c:190:6:USB_HandleClassSetup	24	static
+../Core/Src/usb_config.c:199:6:USB_ResetClass	16	static
+../Core/Src/usb_config.c:205:13:USB_SuspendDevice	4	static
+../Core/Src/usb_config.c:208:13:USB_WakeupDevice	4	static

@@ -1,0 +1,12 @@
+../Core/Src/ncm_device.c:54:6:NCM_SetupPacket	32	static
+../Core/Src/ncm_device.c:90:6:NCM_HandlePacket	32	static
+../Core/Src/ncm_device.c:137:16:NCM_GetNextRxDatagramBuffer	32	static
+../Core/Src/ncm_device.c:202:16:NCM_GetNextTxDatagramBuffer	24	static
+../Core/Src/ncm_device.c:228:6:NCM_FlushTx	32	static
+../Core/Src/ncm_device.c:280:6:NCM_BufferTransmitted	16	static
+../Core/Src/ncm_device.c:284:13:NCM_TransmitNextBuffer	16	static
+../Core/Src/ncm_device.c:342:13:NCM_ControlTransmission	8	static
+../Core/Src/ncm_device.c:349:6:NCM_Reset	16	static
+../Core/Src/ncm_device.c:362:6:NCM_LinkUp	8	static
+../Core/Src/ncm_device.c:367:6:NCM_LinkDown	8	static
+../Core/Src/ncm_device.c:372:6:NCM_ControlTransmit	16	static

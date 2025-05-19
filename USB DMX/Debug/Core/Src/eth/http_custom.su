@@ -1,0 +1,16 @@
+../Drivers/CMSIS/Include/core_cm4.h:1933:34:__NVIC_SystemReset	4	static,ignoring_inline_asm
+../Core/Src/eth/http_custom.c:47:6:httpc_init	16	static
+../Core/Src/eth/http_custom.c:51:6:httpc_timeout	8	static
+../Core/Src/eth/http_custom.c:66:5:fs_open_custom	248	static
+../Core/Src/eth/http_custom.c:136:6:fs_close_custom	16	static
+../Core/Src/eth/http_custom.c:139:5:fs_read_custom	24	static
+../Core/Src/eth/http_custom.c:153:7:httpd_post_begin	24	static
+../Core/Src/eth/http_custom.c:215:7:httpd_post_receive_data	16	static
+../Core/Src/eth/http_custom.c:226:6:httpd_post_finished	24	static
+../Core/Src/eth/http_custom.c:239:13:httpc_parseIp	24	static
+../Core/Src/eth/http_custom.c:248:13:httpc_unescape	104	static
+../Core/Src/eth/http_custom.c:273:23:httpc_parseNextValue	24	static
+../Core/Src/eth/http_custom.c:322:20:httpc_getValueKey	24	static
+../Core/Src/eth/http_custom.c:365:13:httpc_parsePortConfig	32	static
+../Core/Src/eth/http_custom.c:506:13:httpc_recordFailover	32	static
+../Core/Src/eth/http_custom.c:539:13:httpc_setIpConfig	32	static

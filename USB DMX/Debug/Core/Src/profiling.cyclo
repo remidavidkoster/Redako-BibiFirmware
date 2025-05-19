@@ -1,0 +1,5 @@
+../Core/Src/profiling.c:26:6:PROFILING_START	1
+../Core/Src/profiling.c:42:6:PROFILING_IGNORE	1
+../Core/Src/profiling.c:51:6:PROFILING_EVENT	3
+../Core/Src/profiling.c:67:6:PROFILING_EVENTARGS	3
+../Core/Src/profiling.c:85:6:PROFILING_STOP	8

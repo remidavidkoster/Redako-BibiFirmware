@@ -1,0 +1,17 @@
+../Core/lwip/src/apps/snmp/snmp_asn1.c:57:1:snmp_ans1_enc_tlv	14
+../Core/lwip/src/apps/snmp/snmp_asn1.c:133:1:snmp_asn1_enc_raw	2
+../Core/lwip/src/apps/snmp/snmp_asn1.c:151:1:snmp_asn1_enc_u32t	7
+../Core/lwip/src/apps/snmp/snmp_asn1.c:183:1:snmp_asn1_enc_s32t	4
+../Core/lwip/src/apps/snmp/snmp_asn1.c:206:1:snmp_asn1_enc_oid	9
+../Core/lwip/src/apps/snmp/snmp_asn1.c:253:1:snmp_asn1_enc_length_cnt	3
+../Core/lwip/src/apps/snmp/snmp_asn1.c:275:1:snmp_asn1_enc_u32t_cnt	5
+../Core/lwip/src/apps/snmp/snmp_asn1.c:299:1:snmp_asn1_enc_s32t_cnt	5
+../Core/lwip/src/apps/snmp/snmp_asn1.c:323:1:snmp_asn1_enc_oid_cnt	4
+../Core/lwip/src/apps/snmp/snmp_asn1.c:356:1:snmp_asn1_dec_tlv	11
+../Core/lwip/src/apps/snmp/snmp_asn1.c:421:1:snmp_asn1_dec_u32t	10
+../Core/lwip/src/apps/snmp/snmp_asn1.c:459:1:snmp_asn1_dec_s32t	7
+../Core/lwip/src/apps/snmp/snmp_asn1.c:498:1:snmp_asn1_dec_oid	16
+../Core/lwip/src/apps/snmp/snmp_asn1.c:589:1:snmp_asn1_dec_raw	4
+../Core/lwip/src/apps/snmp/snmp_asn1.c:618:1:snmp_asn1_enc_u64t_cnt	2
+../Core/lwip/src/apps/snmp/snmp_asn1.c:644:1:snmp_asn1_dec_u64t	10
+../Core/lwip/src/apps/snmp/snmp_asn1.c:681:1:snmp_asn1_enc_u64t	7

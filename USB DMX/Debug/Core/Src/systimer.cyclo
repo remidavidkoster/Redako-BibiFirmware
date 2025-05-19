@@ -1,0 +1,7 @@
+../Drivers/CMSIS/Include/core_cm4.h:1679:22:__NVIC_EnableIRQ	2
+../Drivers/CMSIS/Include/core_cm4.h:1809:22:__NVIC_SetPriority	2
+../Core/Src/systimer.c:5:6:Systick_Init	2
+../Core/Src/systimer.c:25:6:SysTick_Handler	1
+../Core/Src/systimer.c:29:14:sys_jiffies	1
+../Core/Src/systimer.c:33:14:sys_now	1
+../Core/Src/systimer.c:37:6:delay_ms	2

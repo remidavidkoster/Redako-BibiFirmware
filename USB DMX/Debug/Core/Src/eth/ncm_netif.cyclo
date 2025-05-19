@@ -1,0 +1,3 @@
+../Core/Src/eth/ncm_netif.c:12:14:ncm_netif_output	3
+../Core/Src/eth/ncm_netif.c:29:6:ncm_netif_poll	7
+../Core/Src/eth/ncm_netif.c:55:7:ncm_netif_init	1

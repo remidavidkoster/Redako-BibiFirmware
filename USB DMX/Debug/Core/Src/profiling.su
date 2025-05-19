@@ -1,0 +1,5 @@
+../Core/Src/profiling.c:26:6:PROFILING_START	16	static
+../Core/Src/profiling.c:42:6:PROFILING_IGNORE	16	static
+../Core/Src/profiling.c:51:6:PROFILING_EVENT	16	static
+../Core/Src/profiling.c:67:6:PROFILING_EVENTARGS	16	static
+../Core/Src/profiling.c:85:6:PROFILING_STOP	56	static

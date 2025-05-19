@@ -1,0 +1,9 @@
+../Core/Src/flash_ee.c:21:13:EE_UnlockFlash	2
+../Core/Src/flash_ee.c:29:13:EE_LockFlash	2
+../Core/Src/flash_ee.c:36:13:EE_ClearConfigPage	5
+../Core/Src/flash_ee.c:70:13:EE_ClearFailoverPage	3
+../Core/Src/flash_ee.c:87:6:EE_ReadConfig	5
+../Core/Src/flash_ee.c:110:6:EE_WriteConfig	8
+../Core/Src/flash_ee.c:152:6:EE_ClearConfig	1
+../Core/Src/flash_ee.c:161:6:EE_ReadFailover	3
+../Core/Src/flash_ee.c:167:6:EE_WriteFailover	4
