@@ -141,110 +141,68 @@ static void ReadPortConfig() {
  * @retval None
  */
 static void Clock_Init(void) {
-	// Enable HSE and HSI clock sources
-	RCC->CR |= RCC_CR_HSEON | RCC_CR_HSION;
+    RCC->CR |= RCC_CR_HSEON | RCC_CR_HSION;
 
-	// Disable PLL and wait until it's off
-	RCC->CR &= ~RCC_CR_PLLON;
-	while (RCC->CR & RCC_CR_PLLRDY) { }
+    // Configure PLL (R=143.75, Q=47.92)
+    RCC->CR &= ~RCC_CR_PLLON;
+    while (RCC->CR & RCC_CR_PLLRDY) {
+    }
+    RCC->PLLCFGR |= RCC_PLLCFGR_PLLSRC_HSE | RCC_PLLCFGR_PLLM_0 | (72 << RCC_PLLCFGR_PLLN_Pos) | RCC_PLLCFGR_PLLQ_1;
+    RCC->PLLCFGR |= RCC_PLLCFGR_PLLREN | RCC_PLLCFGR_PLLQEN;
+    RCC->CR |= RCC_CR_PLLON;
 
-	// Configure PLL for 144MHz output from 8MHz crystal
-	// 8MHz / 1 (PLLM=1) = 8MHz PLL input
-	// 8MHz * 36 (PLLN=36) = 288MHz VCO
-	// 288MHz / 2 (PLLR=2) = 144MHz system clock
-	// 288MHz / 6 (PLLQ=6) = 48MHz for USB/ADC
-	RCC->PLLCFGR = RCC_PLLCFGR_PLLSRC_HSE | // HSE as PLL source
-	                RCC_PLLCFGR_PLLM_0 |     // PLLM = 1 (bits: 001)
-	                (36 << RCC_PLLCFGR_PLLN_Pos) | // PLLN = 36
-	                RCC_PLLCFGR_PLLR_0 |     // PLLR = 2 (bits: 01)
-	                RCC_PLLCFGR_PLLQ_1;      // PLLQ = 6 (bits: 10)
+    // Select PLL as main clock, AHB/2, Wait and then transition into boost mode
+    RCC->CFGR |= RCC_CFGR_HPRE_3 | RCC_CFGR_SW_PLL;
+    PWR->CR5 &= ~PWR_CR5_R1MODE;
+    unsigned int latency = FLASH->ACR;
+    latency &= ~0xFF;
+    latency |= 4;
+    FLASH->ACR = latency;
+    while ((FLASH->ACR & FLASH_ACR_LATENCY_Msk) != 4) {
+    }
+    RCC->CFGR &= ~RCC_CFGR_HPRE_3;
 
-	// Enable PLLR and PLLQ outputs
-	RCC->PLLCFGR |= RCC_PLLCFGR_PLLREN | RCC_PLLCFGR_PLLQEN;
 
-	// Enable PLL
-	RCC->CR |= RCC_CR_PLLON;
-	while (!(RCC->CR & RCC_CR_PLLRDY)) { } // Wait until PLL is ready
+    // Enable the HSI48 oscillator
+    RCC->CRRCR |= RCC_CRRCR_HSI48ON;
 
-	// Select PLL as main clock, temporarily set AHB/2 for transition
-	RCC->CFGR |= RCC_CFGR_HPRE_3 | RCC_CFGR_SW_PLL;
+    // Wait for the HSI48 oscillator to be ready
+    while (!(RCC->CRRCR & RCC_CRRCR_HSI48RDY))
+    {
+        // Optional: Add a timeout here to prevent infinite loops
+    }
 
-	// Exit R1 power mode for full speed operation
-	PWR->CR5 &= ~PWR_CR5_R1MODE;
+    // Select & Enable IO Clocks (PLL > USB, ADC; PLLC (71.875) > UART & I²C)
+    RCC->CCIPR = RCC_CCIPR_CLK48SEL_0 | RCC_CCIPR_ADC12SEL_1;
+    RCC->AHB2ENR |= RCC_AHB2ENR_ADC12EN | RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN;
+    RCC->APB1ENR1 |= RCC_APB1ENR1_USBEN | RCC_APB1ENR1_UART4EN | RCC_APB1ENR1_USART3EN | RCC_APB1ENR1_USART2EN | RCC_APB1ENR1_TIM2EN;
+    RCC->APB1ENR2 |= RCC_APB1ENR2_I2C4EN;
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
 
-	// Update flash latency for 144MHz operation (5 wait states for voltage range 1)
-	unsigned int latency = FLASH->ACR;
-	latency &= ~0xFF;
-	latency |= 5; // 5 wait states for 144MHz in range 1
-	FLASH->ACR = latency;
-	while ((FLASH->ACR & FLASH_ACR_LATENCY_Msk) != 5) { }
+    // Enable DMAMUX & DMA1 Clock
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN | RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMA2EN;
 
-	// Set AHB prescaler back to /1 for full speed
-	RCC->CFGR &= ~RCC_CFGR_HPRE_3;
+    // Configure RTC-Clock for Backup registers, if necessary
+    RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN;
+    if ((RCC->BDCR & RCC_BDCR_RTCEN) == 0) {
+        PWR->CR1 |= PWR_CR1_DBP;
+        RCC->BDCR |= 0x02 << RCC_BDCR_RTCSEL_Pos;
+        RCC->BDCR |= RCC_BDCR_RTCEN;
+        PWR->CR1 &= ~PWR_CR1_DBP;
+    }
 
-	// Select & Enable IO Clocks
-	// Set USB clock source to PLL-Q
-	RCC->CCIPR = RCC_CCIPR_CLK48SEL_0 | RCC_CCIPR_ADC12SEL_1;
-	RCC->AHB2ENR |= RCC_AHB2ENR_ADC12EN | RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN;
-	RCC->APB1ENR1 |= RCC_APB1ENR1_USBEN | RCC_APB1ENR1_UART4EN | RCC_APB1ENR1_USART3EN | RCC_APB1ENR1_USART2EN | RCC_APB1ENR1_TIM2EN;
-	RCC->APB1ENR2 |= RCC_APB1ENR2_I2C4EN;
-	RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+    while ((RCC->CFGR & RCC_CFGR_SWS_Msk) != RCC_CFGR_SWS_PLL) {
+    }
 
-	// Enable DMAMUX & DMA Clocks
-	RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN | RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMA2EN;
 
-	// Configure RTC-Clock for Backup registers, if necessary
-	RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN;
-	if ((RCC->BDCR & RCC_BDCR_RTCEN) == 0) {
-	    PWR->CR1 |= PWR_CR1_DBP;
-	    RCC->BDCR |= 0x02 << RCC_BDCR_RTCSEL_Pos;
-	    RCC->BDCR |= RCC_BDCR_RTCEN;
-	    PWR->CR1 &= ~PWR_CR1_DBP;
-	}
+    // Enable CRS peripheral clock
+    RCC->APB1ENR1 |= RCC_APB1ENR1_CRSEN;
 
-	// Wait until PLL is used as system clock
-	while ((RCC->CFGR & RCC_CFGR_SWS_Msk) != RCC_CFGR_SWS_PLL) { }
+    // Configure synchronization source to USB SOF in CRS_CFGR
+    CRS->CFGR = CRS_CFGR_SYNCSRC_1;  // USB SOF selected as sync source (value = 0x2)
 
-//	  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-//	  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-//
-//	  /** Configure the main internal regulator output voltage
-//	  */
-//	  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
-//
-//	  /** Initializes the RCC Oscillators according to the specified parameters
-//	  * in the RCC_OscInitTypeDef structure.
-//	  */
-//	  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSI48;
-//	  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-//	  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-//	  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
-//	  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-//	  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-//	  RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;
-//	  RCC_OscInitStruct.PLL.PLLN = 18;
-//	  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-//	  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV6;
-//	  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
-//	  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-//	  {
-////	    Error_Handler();
-//	  }
-//
-//	  /** Initializes the CPU, AHB and APB buses clocks
-//	  */
-//	  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-//	                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-//	  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-//	  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-//	  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-//	  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-//
-//	  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
-//	  {
-////	    Error_Handler();
-//	  }
-
+    // Enable automatic trimming and CRS
+    CRS->CR = CRS_CR_AUTOTRIMEN | CRS_CR_CEN;
 
     SystemCoreClockUpdate();
 }
