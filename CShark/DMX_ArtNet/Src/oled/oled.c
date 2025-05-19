@@ -160,29 +160,29 @@ static const unsigned char oledTransitions = 9;
 static OLED_State oledState = {.State = OLEDM_Offline, .ActiveScreen = &oledScreens[0], .OnRender = NULL, .OnNavigate = NULL};
 
 void OLED_Init() {
-    // Do not enable OLED if subboard is not detected
-    if ((GPIOB->IDR & (1 << 15)) == 0) {
-        return;
-    }
-
-    GPIOB->MODER |= (0x3 << GPIO_MODER_MODE15_Pos);
-    oledState.State = OLEDM_Active;
-
-    // Initialize I²C & DMA
-    DMAMUX1_Channel8->CCR = 23; // I2C4_TX (RX=22)
-
-    // Timings for 100kHz @ 143.75MHz as given by CubeMX
-    I2C4->TIMINGR = 0x20B0D8FF;
-    I2C4->CR2 |= I2C_CR2_AUTOEND;
-    I2C4->CR1 |= I2C_CR1_PE | I2C_CR1_TCIE | I2C_CR1_STOPIE;
-
-    NVIC_SetPriority(I2C4_EV_IRQn, 16);
-    NVIC_EnableIRQ(I2C4_EV_IRQn);
-
-    SSD1306_Init(OLED_InitSendData);
-
-    lastTick = sys_now();
-    bootTimer = sys_now();
+//    // Do not enable OLED if subboard is not detected
+//    if ((GPIOB->IDR & (1 << 15)) == 0) {
+//        return;
+//    }
+//
+//    GPIOB->MODER |= (0x3 << GPIO_MODER_MODE15_Pos);
+//    oledState.State = OLEDM_Active;
+//
+//    // Initialize I²C & DMA
+//    DMAMUX1_Channel8->CCR = 23; // I2C4_TX (RX=22)
+//
+//    // Timings for 100kHz @ 143.75MHz as given by CubeMX
+////    I2C4->TIMINGR = 0x20B0D8FF;
+//    I2C4->CR2 |= I2C_CR2_AUTOEND;
+//    I2C4->CR1 |= I2C_CR1_PE | I2C_CR1_TCIE | I2C_CR1_STOPIE;
+//
+////    NVIC_SetPriority(I2C4_EV_IRQn, 16);
+//    NVIC_EnableIRQ(I2C4_EV_IRQn);
+//
+//    SSD1306_Init(OLED_InitSendData);
+//
+//    lastTick = sys_now();
+//    bootTimer = sys_now();
 }
 
 void OLED_Tick() {
@@ -294,55 +294,55 @@ void OLED_ForceRefresh() {
 }
 
 static void OLED_InitSendData(const unsigned char *buffer, unsigned short len, void (*callback)()) {
-    I2C4->CR1 &= ~(I2C_CR1_RXDMAEN | I2C_CR1_TXDMAEN);
-    I2C4->CR1 |= I2C_CR1_TXDMAEN;
-
-    I2C4->CR2 &= ~(I2C_CR2_SADD_Msk);
-    I2C4->CR2 |= (OLED_I2CADDR << 1);
-
-    DMA2_Channel1->CCR = DMA_CCR_MINC | DMA_CCR_DIR;
-    DMA2_Channel1->CPAR = (uint32_t)&I2C4->TXDR;
-
-    OLED_SendData(buffer, len);
-
-    I2C4->CR2 |= I2C_CR2_START;
-
-    pending_callback = callback;
+//    I2C4->CR1 &= ~(I2C_CR1_RXDMAEN | I2C_CR1_TXDMAEN);
+//    I2C4->CR1 |= I2C_CR1_TXDMAEN;
+//
+//    I2C4->CR2 &= ~(I2C_CR2_SADD_Msk);
+//    I2C4->CR2 |= (OLED_I2CADDR << 1);
+//
+//    DMA2_Channel1->CCR = DMA_CCR_MINC | DMA_CCR_DIR;
+//    DMA2_Channel1->CPAR = (uint32_t)&I2C4->TXDR;
+//
+//    OLED_SendData(buffer, len);
+//
+//    I2C4->CR2 |= I2C_CR2_START;
+//
+//    pending_callback = callback;
 }
 
 static void OLED_SendData(const unsigned char *buffer, unsigned short len) {
-    I2C4->CR2 &= ~(I2C_CR2_NBYTES_Msk | I2C_CR2_RELOAD);
-
-    if (len <= 0xFF) {
-        I2C4->CR2 |= (len << I2C_CR2_NBYTES_Pos);
-        DMA2_Channel1->CNDTR = len;
-
-        pending_buffer = NULL;
-        pending_len = 0;
-    } else {
-        I2C4->CR2 |= (0xFF << I2C_CR2_NBYTES_Pos) | I2C_CR2_RELOAD;
-        DMA2_Channel1->CNDTR = 0xFF;
-
-        pending_buffer = buffer + 0xFF;
-        pending_len = len - 0xFF;
-    }
-
-    DMA2_Channel1->CMAR = (uint32_t)buffer;
-    DMA2_Channel1->CCR |= DMA_CCR_EN;
+//    I2C4->CR2 &= ~(I2C_CR2_NBYTES_Msk | I2C_CR2_RELOAD);
+//
+//    if (len <= 0xFF) {
+//        I2C4->CR2 |= (len << I2C_CR2_NBYTES_Pos);
+//        DMA2_Channel1->CNDTR = len;
+//
+//        pending_buffer = NULL;
+//        pending_len = 0;
+//    } else {
+//        I2C4->CR2 |= (0xFF << I2C_CR2_NBYTES_Pos) | I2C_CR2_RELOAD;
+//        DMA2_Channel1->CNDTR = 0xFF;
+//
+//        pending_buffer = buffer + 0xFF;
+//        pending_len = len - 0xFF;
+//    }
+//
+//    DMA2_Channel1->CMAR = (uint32_t)buffer;
+//    DMA2_Channel1->CCR |= DMA_CCR_EN;
 }
 
 void I2C4_EV_IRQHandler() {
-    if (I2C4->ISR & I2C_ISR_TCR) {
-        OLED_SendData(pending_buffer, pending_len);
-    }
-
-    if (I2C4->ISR & I2C_ISR_STOPF) {
-        I2C4->ICR = I2C_ICR_STOPCF;
-
-        if (pending_callback != NULL) {
-            pending_callback();
-        }
-    }
+//    if (I2C4->ISR & I2C_ISR_TCR) {
+//        OLED_SendData(pending_buffer, pending_len);
+//    }
+//
+//    if (I2C4->ISR & I2C_ISR_STOPF) {
+//        I2C4->ICR = I2C_ICR_STOPCF;
+//
+//        if (pending_callback != NULL) {
+//            pending_callback();
+//        }
+//    }
 }
 
 static void OLED_RenderEditFrame(char *title) {
