@@ -40,7 +40,7 @@ uint8_t failed;
 
 Madgwick filter;
 
-#define SAMPLE_FREQUENCY 4000
+#define SAMPLE_FREQUENCY 9000
 
 typedef struct {
 	volatile float angleFull;

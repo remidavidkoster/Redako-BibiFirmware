@@ -199,7 +199,7 @@ typedef struct {
 } PIDController;
 
 
-volatile PIDController pidSpeed = {
+volatile PIDController PID_AngleWithSpeed = {
 		.p = 0.000004f,
 		.i = 0.0f,
 		.d = 0.01f,
@@ -208,7 +208,7 @@ volatile PIDController pidSpeed = {
 		.target = 0.0f,
 };
 
-volatile PIDController pidPosition = {
+volatile PIDController PID_PositionWithVoltage = {
 		.p = 7.5f,
 		.i = 0.0f,
 		.d = 5000.0f,
@@ -277,10 +277,10 @@ float runPID(volatile PIDController *pid, float currentValue) {
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if (htim->Instance == TIM6) {
 
-		if (pidSpeed.on){
-			speed += runPID(&pidSpeed, madgwick.angleFull);
+		if (PID_AngleWithSpeed.on){
+			speed += runPID(&PID_AngleWithSpeed, madgwick.angleFull);
 
-			speed = LIMIT(-pidSpeed.limit, speed, pidSpeed.limit);
+			speed = LIMIT(-PID_AngleWithSpeed.limit, speed, PID_AngleWithSpeed.limit);
 
 			// Speed should be in meters per second
 			electricalAngleTarget += speed * METERS2RAD * POLE_PAIRS / 10000.0f;
@@ -296,9 +296,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
 
 
-		pidPosition.target = electricalAngleTarget;
+		PID_PositionWithVoltage.target = electricalAngleTarget;
 
-		phaseVoltage = -runPID(&pidPosition, angleFull * POLE_PAIRS);
+		phaseVoltage = -runPID(&PID_PositionWithVoltage, angleFull * POLE_PAIRS);
 
 		electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
 
@@ -417,9 +417,9 @@ int main(void) {
 	} else {
 		configNRFTCMfx();
 
-		pidSpeed.on = 0;
-		phaseVoltage = 2;
-		pidSpeed.target = 0;
+		PID_AngleWithSpeed.on = 1;
+//		phaseVoltage = 2;
+		PID_AngleWithSpeed.target = 0;
 	}
 
 
@@ -541,7 +541,7 @@ int main(void) {
 
 
 			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
-			static int moved = 0;
+			static int moved = 1;
 			if (!moved && TIM2->CNT > 15000000){
 				moved = 1;
 				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
@@ -583,8 +583,8 @@ int main(void) {
 				movement.running = 1;
 				movement.step = ACCELERATING;
 				movement.startOffset = diaboloPosition;
-				pidSpeed.target = LIMIT(-90, -movement.accAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
-				pidSpeed.on = 1;
+				PID_AngleWithSpeed.target = LIMIT(-90, -movement.accAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
+				PID_AngleWithSpeed.on = 1;
 			}
 
 			if (movement.running) {
@@ -592,12 +592,12 @@ int main(void) {
 
 				if (movement.step == ACCELERATING && positionDelta > movement.accDistance) {
 					movement.step = COASTING;
-					pidSpeed.target = -2 * movement.direction;
+					PID_AngleWithSpeed.target = -2 * movement.direction;
 				}
 
 				if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
 					movement.step = DECELERATING;
-					pidSpeed.target = LIMIT(-90, movement.decAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
+					PID_AngleWithSpeed.target = LIMIT(-90, movement.decAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
 				}
 
 				if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
@@ -611,14 +611,14 @@ int main(void) {
 					// Otherwise move to the 'stopping' step, where it waits for half a second until it stabilizes
 					else {
 						movement.step = STOPPING;
-						pidSpeed.target = 0;
+						PID_AngleWithSpeed.target = 0;
 						movement.stoppingTimestamp = TIM2->CNT;
 					}
 				}
 
 				if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
 					movement.running = 0;
-					pidSpeed.on = 0;
+					PID_AngleWithSpeed.on = 0;
 					movement.endTimestamp = TIM2->CNT;
 				}
 			}
@@ -631,7 +631,7 @@ int main(void) {
 
 				// If we haven't had a message in a second, turn off the motor
 				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
-					pidSpeed.on = 0;
+					PID_AngleWithSpeed.on = 0;
 					phaseVoltage = 0;
 				}
 
@@ -641,10 +641,10 @@ int main(void) {
 				if (NRF_DataReady()) {
 					NRF_GetData(buffer);
 					NRF_ReceiveTimestamp = TIM2->CNT;
-					pidSpeed.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
-					pidSpeed.on = 1;
+					PID_AngleWithSpeed.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
+					PID_AngleWithSpeed.on = 1;
 					phaseVoltage = 5;
-					if (ABS(pidSpeed.target) > 45) phaseVoltage = 6;
+					if (ABS(PID_AngleWithSpeed.target) > 45) phaseVoltage = 6;
 
 					// Reset speed if right shoulder button is pressed
 					if (buffer[6] & 0b01000000) speed = 0;
@@ -699,6 +699,50 @@ int main(void) {
 			myData.e = 0;
 
 			sendFloats(&myData);
+
+
+
+
+
+
+
+
+			if (PID_AngleWithSpeed.on){
+				speed += runPID(&PID_AngleWithSpeed, madgwick.angleFull);
+
+				speed = LIMIT(-PID_AngleWithSpeed.limit, speed, PID_AngleWithSpeed.limit);
+
+				// Speed should be in meters per second
+				electricalAngleTarget += speed * METERS2RAD * POLE_PAIRS / 10000.0f;
+			}
+			else {
+				speed = 0;
+			}
+
+			motorAngleFull = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
+
+			if (electricalAngleTarget - angleFull * POLE_PAIRS > PID_CLIP) electricalAngleTarget = angleFull * POLE_PAIRS + PID_CLIP;
+			if (angleFull * POLE_PAIRS - electricalAngleTarget > PID_CLIP) electricalAngleTarget = angleFull * POLE_PAIRS - PID_CLIP;
+
+
+
+			PID_PositionWithVoltage.target = electricalAngleTarget;
+
+			phaseVoltage = -runPID(&PID_PositionWithVoltage, angleFull * POLE_PAIRS);
+
+			electricalAngle = _normalizeAngle((float)POLE_PAIRS * angle_prev - zero_electric_angle);
+
+			setPhaseVoltage(phaseVoltage, electricalAngle);
+
+
+
+
+
+
+
+
+
+
 
 			microsUsed = TIM2->CNT - microsPrevious - microsPerReading;
 
