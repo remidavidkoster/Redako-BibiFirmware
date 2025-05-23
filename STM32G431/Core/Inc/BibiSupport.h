@@ -139,7 +139,6 @@ void BAT_Update(){
 	BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
 }
 
-
 // Low battery shut down
 
 void BAT_CheckLowShutdown(){
@@ -159,7 +158,7 @@ void CHG_RunLogic(){
 	CHG.enabled = BAT.voltage > 2.75f;
 
 	// Charge enable logic
-	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)(CHG.plugged && CHG.enabled));
+	HAL_GPIO_WritePin(CHARGE_ENABLE_GPIO_Port, CHARGE_ENABLE_Pin, (GPIO_PinState)(CHG.enabled));
 }
 
 

@@ -682,7 +682,6 @@ int main(void) {
 
 			ENC_Update();
 
-
 			// Debug send command
 			if (send == 1) {
 				send = 0;
