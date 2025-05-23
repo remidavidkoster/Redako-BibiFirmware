@@ -116,7 +116,7 @@ extern uint8_t payload;
 extern "C" {
 #endif
 
-uint8_t softSpiTransfer(uint8_t working);
+uint8_t NRF_SPITransfer(uint8_t working);
 void NRF_Init();
 void NRF_Config(uint8_t rfSetup);
 void NRF_Send(uint8_t *value);

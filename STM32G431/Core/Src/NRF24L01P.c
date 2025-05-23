@@ -16,19 +16,32 @@ uint8_t channel;
 // Payload width in uint8_ts default 16 max 32.
 uint8_t payload;
 
-uint8_t softSpiTransfer(uint8_t txByte) {
 
-//		HAL_SPI_DeInit(&hspi2);
-//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
-//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
-//		HAL_SPI_Init(&hspi2);
 
-		uint8_t rxByte = 0x00;    // Variable to store received byte
 
-	HAL_SPI_TransmitReceive(&hspi2, &txByte, &rxByte, 1, HAL_MAX_DELAY);
 
-	return rxByte;
+uint8_t NRF_SPITransfer(uint8_t txByte) {
+
+	SPI2->CR1 = 0;
+	SPI2->CR1 |= SPI_CR1_MSTR;        // Master mode
+	SPI2->CR1 |= SPI_CR1_SSI | SPI_CR1_SSM; // Software slave management
+	SPI2->CR1 |= SPI_CR1_SPE;         // Enable SPI
+
+    // Wait for TX buffer empty (TXE bit)
+    while (!(SPI2->SR & SPI_SR_TXE));
+
+    // Send data
+    SPI2->DR = txByte;
+
+    // Wait for RX buffer not empty (RXNE bit)
+    while (!(SPI2->SR & SPI_SR_RXNE));
+
+    // Return received data
+    return (uint8_t)SPI2->DR;
 }
+
+
+
 
 
 //
@@ -79,14 +92,14 @@ uint8_t softSpiTransfer(uint8_t txByte) {
 void transferSync(uint8_t *dataout, uint8_t *datain, uint8_t len) {
 	uint8_t i;
 	for (i = 0; i < len; i++) {
-		datain[i] = softSpiTransfer(dataout[i]);
+		datain[i] = NRF_SPITransfer(dataout[i]);
 	}
 }
 
 void transmitSync(uint8_t *dataout, uint8_t len) {
 	uint8_t i;
 	for (i = 0; i < len; i++) {
-		softSpiTransfer(dataout[i]);
+		NRF_SPITransfer(dataout[i]);
 	}
 }
 
@@ -133,12 +146,12 @@ void setTADDR(uint8_t * adr) {
 	writeRegister(TX_ADDR, adr, mirf_ADDR_LEN);
 }
 
+
+
 // Checks if data is available for reading
 bool NRF_DataReady() {
-
 	// See note in getData() function - just checking RX_DR isn't good enough
 	uint8_t status = getStatus();
-
 	// We can short circuit on RX_DR, but if it's not set, we still need
 	// to check the FIFO for any pending packets
 	if (status & (1 << RX_DR)) return 1;
@@ -158,7 +171,7 @@ void NRF_GetData(uint8_t * data) {
 	// Reads payload uint8_ts into data array
 
 	csnLow();                               // Pull down chip select
-	softSpiTransfer(R_RX_PAYLOAD);            // Send cmd to read rx payload
+	NRF_SPITransfer(R_RX_PAYLOAD);            // Send cmd to read rx payload
 	transferSync(data, data, payload); // Read payload
 	csnHigh();                               // Pull up chip select
 	// NVI: per product spec, p 67, note c:
@@ -175,8 +188,8 @@ void NRF_GetData(uint8_t * data) {
 // Clocks only one uint8_t into the given MiRF register
 void configRegister(uint8_t reg, uint8_t value) {
 	csnLow();
-	softSpiTransfer(W_REGISTER | (REGISTER_MASK & reg));
-	softSpiTransfer(value);
+	NRF_SPITransfer(W_REGISTER | (REGISTER_MASK & reg));
+	NRF_SPITransfer(value);
 	csnHigh();
 }
 
@@ -184,7 +197,7 @@ void configRegister(uint8_t reg, uint8_t value) {
 // Reads an array of uint8_ts from the given start position in the MiRF registers.
 void readRegister(uint8_t reg, uint8_t * value, uint8_t len) {
 	csnLow();
-	softSpiTransfer(R_REGISTER | (REGISTER_MASK & reg));
+	NRF_SPITransfer(R_REGISTER | (REGISTER_MASK & reg));
 	transferSync(value, value, len);
 	csnHigh();
 }
@@ -192,7 +205,7 @@ void readRegister(uint8_t reg, uint8_t * value, uint8_t len) {
 // Writes an array of uint8_ts into inte the MiRF registers.
 void writeRegister(uint8_t reg, uint8_t * value, uint8_t len) {
 	csnLow();
-	softSpiTransfer(W_REGISTER | (REGISTER_MASK & reg));
+	NRF_SPITransfer(W_REGISTER | (REGISTER_MASK & reg));
 	transmitSync(value, len);
 	csnHigh();
 }
@@ -217,11 +230,11 @@ void NRF_Send(uint8_t *value) {
 	powerUpTx();                   // Set to transmitter mode , Power up
 
 	csnLow();                      // Pull down chip select
-	softSpiTransfer(FLUSH_TX);     // Write cmd to flush tx fifo
+	NRF_SPITransfer(FLUSH_TX);     // Write cmd to flush tx fifo
 	csnHigh();                     // Pull up chip select
 
 	csnLow();                      // Pull down chip select
-	softSpiTransfer(W_TX_PAYLOAD); // Write cmd to write payload
+	NRF_SPITransfer(W_TX_PAYLOAD); // Write cmd to write payload
 	transmitSync(value, payload);  // Write payload
 	csnHigh();                     // Pull up chip select
 
@@ -261,7 +274,7 @@ void powerUpRx() {
 
 void flushRx() {
 	csnLow();
-	softSpiTransfer(FLUSH_RX);
+	NRF_SPITransfer(FLUSH_RX);
 	csnHigh();
 }
 

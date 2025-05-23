@@ -146,16 +146,16 @@ HAL_StatusTypeDef icm42670_start_accel(ICM42670 *sensor, uint8_t scale, uint8_t 
 HAL_StatusTypeDef icm42670_start_gyro(ICM42670 *sensor, uint8_t rate, uint8_t freq) {
     switch (rate) {
         case ICM42670_GYRO_FS_2000_DPS:
-            sensor->gyro_calib = 16.4f;
+            sensor->gyro_calib = 1/16.4f;
             break;
         case ICM42670_GYRO_FS_1000_DPS:
-            sensor->gyro_calib = 32.8f;
+            sensor->gyro_calib = 1/32.8f;
             break;
         case ICM42670_GYRO_FS_500_DPS:
-            sensor->gyro_calib = 65.5f;
+            sensor->gyro_calib = 1/65.5f;
             break;
         case ICM42670_GYRO_FS_250_DPS:
-            sensor->gyro_calib = 131;
+            sensor->gyro_calib = 1/131.0f;
             break;
         default:
             break;
@@ -176,8 +176,6 @@ HAL_StatusTypeDef icm42670_start_gyro(ICM42670 *sensor, uint8_t rate, uint8_t fr
 
 
 
-
-
 sensorXYZFloat icm42670_read_accel_gyro(ICM42670 *sensor, sensorXYZFloat *gyro_out) {
     uint8_t tx[13] = {0};     // 1 byte for register address + 12 bytes data
     uint8_t rx[13] = {0};     // Response buffer
@@ -188,7 +186,26 @@ sensorXYZFloat icm42670_read_accel_gyro(ICM42670 *sensor, sensorXYZFloat *gyro_o
     tx[0] = ICM42670_REG_ACCEL_DATA_X1 | 0x80;
 
     HAL_GPIO_WritePin(SPI1_CSN_GPIO_Port, SPI1_CSN_Pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive(&hspi1, tx, rx, 13, HAL_MAX_DELAY);
+
+	SPI1->CR1 = 0;
+	SPI1->CR1 |= SPI_CR1_MSTR;        // Master mode
+	SPI1->CR1 |= SPI_CR1_SSI | SPI_CR1_SSM; // Software slave management
+	SPI1->CR1 |= SPI_CR1_SPE;         // Enable SPI
+
+    for (int i = 0; i < 13; i++) {
+        // Wait until TXE (Transmit buffer empty)
+        while (!(SPI1->SR & SPI_SR_TXE));
+
+        // Write byte to data register to start transmission
+        SPI1->DR = tx[i];
+
+        // Wait until RXNE (Receive buffer not empty)
+        while (!(SPI1->SR & SPI_SR_RXNE));
+
+        // Read received byte
+        rx[i] = SPI1->DR;
+    }
+
     HAL_GPIO_WritePin(SPI1_CSN_GPIO_Port, SPI1_CSN_Pin, GPIO_PIN_SET);
 
     // Parse accelerometer raw data
@@ -206,9 +223,9 @@ sensorXYZFloat icm42670_read_accel_gyro(ICM42670 *sensor, sensorXYZFloat *gyro_o
     accel_out.y = raw_accel.y / (float)sensor->accel_calib;
     accel_out.z = raw_accel.z / (float)sensor->accel_calib;
 
-    gyro_out->x = raw_gyro.x / (float)sensor->gyro_calib;
-    gyro_out->y = raw_gyro.y / (float)sensor->gyro_calib;
-    gyro_out->z = raw_gyro.z / (float)sensor->gyro_calib;
+    gyro_out->x = raw_gyro.x * (float)sensor->gyro_calib;
+    gyro_out->y = raw_gyro.y * (float)sensor->gyro_calib;
+    gyro_out->z = raw_gyro.z * (float)sensor->gyro_calib;
 
     return accel_out;
 }
@@ -297,9 +314,9 @@ sensorXYZFloat icm42670_read_gyro(ICM42670 *sensor) {
 
     zDebug = raw.z;
 
-    sensorData.x = raw.x / (float)sensor->gyro_calib;
-    sensorData.y = raw.y / (float)sensor->gyro_calib;
-    sensorData.z = raw.z / (float)sensor->gyro_calib;
+    sensorData.x = raw.x * (float)sensor->gyro_calib;
+    sensorData.y = raw.y * (float)sensor->gyro_calib;
+    sensorData.z = raw.z * (float)sensor->gyro_calib;
     return sensorData;
 }
 

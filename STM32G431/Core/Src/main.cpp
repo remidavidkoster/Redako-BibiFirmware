@@ -115,12 +115,34 @@ const int32_t sensor_direction = 1;
 
 
 void ENC_Update(){
-	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
 
 	txData[0] = 0b1010 << 4;
 	txData[1] = 0x03;
 
-	HAL_SPI_TransmitReceive(&hspi3, txData, rxData, 6, HAL_MAX_DELAY);
+
+
+	SPI3->CR1 = 0;
+	SPI3->CR1 |= SPI_CR1_MSTR;        // Master mode
+	SPI3->CR1 |= SPI_CR1_SSI | SPI_CR1_SSM; // Software slave management
+	SPI3->CR1 |= SPI_CR1_SPE;         // Enable SPI
+
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
+
+    for (int i = 0; i < 6; i++) {
+        // Wait until TXE (Transmit buffer empty)
+        while (!(SPI3->SR & SPI_SR_TXE));
+
+        // Write byte to data register to start transmission
+        SPI3->DR = txData[i];
+
+        // Wait until RXNE (Receive buffer not empty)
+        while (!(SPI3->SR & SPI_SR_RXNE));
+
+        // Read received byte
+        rxData[i] = SPI3->DR;
+    }
+
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)1);
 
 	lastRawAngle = 0;
 
@@ -129,7 +151,6 @@ void ENC_Update(){
 	lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
 	lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
 
-	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)1);
 
 	float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
 	//	    angle_prev_ts = TIM6->CNT;
@@ -333,6 +354,39 @@ unsigned long microsPerReading, microsPrevious, microsUsed;
 
 
 
+// Timing measurement struct for main loop profiling
+typedef struct {
+    uint32_t total_loop_time;
+    uint32_t battery_update_time;
+    uint32_t battery_led_time;
+    uint32_t charge_logic_time;
+    uint32_t low_battery_check_time;
+    uint32_t button_check_time;
+    uint32_t imu_read_time;
+    uint32_t gyro_offset_time;
+    uint32_t madgwick_filter_time;
+    uint32_t angle_calculations_time;
+    uint32_t diabolo_calculations_time;
+    uint32_t movement_queue_time;
+    uint32_t movement_start_time;
+    uint32_t movement_execution_time;
+    uint32_t remote_control_time;
+    uint32_t nrf_data_processing_time;
+    uint32_t cue_processing_time;
+    uint32_t encoder_update_time;
+    uint32_t debug_send_time;
+    uint32_t data_output_time;
+    uint32_t misc_calculations_time;
+} LoopTimingProfile;
+
+// Global timing profile instance
+LoopTimingProfile timing_profile = {0};
+
+uint32_t func_start_time;
+
+// Macro for easy timing measurement
+#define TIME_FUNCTION_START() func_start_time = TIM2->CNT
+#define TIME_FUNCTION_END(duration_var) duration_var = TIM2->CNT - func_start_time
 
 
 
@@ -348,16 +402,16 @@ int main(void) {
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
 	MX_DMA_Init();
-	MX_TIM1_Init();
 	MX_ADC1_Init();
 	MX_USART2_UART_Init();
-	MX_TIM2_Init();
 	MX_ADC2_Init();
-	MX_TIM6_Init();
-	MX_SPI2_Init();
 	MX_SPI1_Init();
+	MX_SPI2_Init();
 	MX_SPI3_Init();
+	MX_TIM1_Init();
+	MX_TIM2_Init();
 	MX_TIM4_Init();
+	MX_TIM6_Init();
 	MX_TIM8_Init();
 
 
@@ -470,240 +524,231 @@ int main(void) {
 	//	HAL_TIM_Base_Start_IT(&htim6);
 
 
-	while (1)  {
-
-		// If another loop is due
-		if (TIM2->CNT - microsPrevious >= microsPerReading) {
-
-			// Update global battery Voltage
-			BAT_Update();
-
-			// Display Battery on led
-			BAT_VoltageToRGB(BAT.voltage);
-
-			// Run charge management logic
-			CHG_RunLogic();
-
-			// Low battery shut down
-			if (TIM2->CNT > 1000000){
-				BAT_CheckLowShutdown();
-			}
-
-			// Button shut down
-			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-
-
-
-
-
-			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
-			sensorXYZFloat gyro_data;
-			imu_data.accel = icm42670_read_accel_gyro(&imu, &gyro_data);
-			imu_data.gyro = gyro_data;
-
-			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
-			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
-			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
-
-			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
-			filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
-
-			// Get the roll angle
-			madgwick.currentAngle = filter.getRoll();
-			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
-			madgwick.anglePrev = madgwick.currentAngle;
-
-			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
-			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
-			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
-
-			// Compute total angle
-			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
-
-
-
-			motorAngleFull = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
-
-			// Compute the angle the diabolo has made from its startup position
-			diaboloAngleFull = motorAngleFull + madgwick.angleFull;
-
-			diaboloPosition = diaboloAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE;
-
-			diaboloSpeed = SPEED_ALPHA * (diaboloPosition - lastDiaboloPosition) * 1000.0f + (1.0f - SPEED_ALPHA) * diaboloSpeed;
-
-			diaboloAcceleration = ACCEL_ALPHA * (diaboloSpeed - lastDiaboloSpeed) * 1000.0f + (1.0f - ACCEL_ALPHA) * diaboloAcceleration;
-
-			lastDiaboloPosition = diaboloPosition;
-			lastDiaboloSpeed = diaboloSpeed;
-
-
-
-
-
-			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
-			static int moved = 0;
-			if (!moved && TIM2->CNT > 15000000){
-				moved = 1;
-				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
-			}
-
-
-
-
-
-			// If we still have cued movements, and there's currently none running
-			if (queuedMovementCount && !movement.running){
-
-				// If it's time for the next one
-				if (TIM2->CNT > queuedMovements[0].startTime){
-
-					// Start next cued movement
-					startMovement(queuedMovements[0]);
-
-					// Move cues down a row
-					memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
-
-					// Zero out the last element
-					memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
-
-					// Decrement qued movement counter
-					queuedMovementCount--;
-				}
-			}
-
-
-			if (movement.start){
-				movement.start = 0;
-				movement.startTimestamp = TIM2->CNT;
-				movement.running = 1;
-				movement.step = ACCELERATING;
-				movement.startOffset = diaboloPosition;
-				pidSpeed.target = LIMIT(-90, -movement.accAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
-				pidSpeed.on = 1;
-			}
-
-			if (movement.running) {
-				float positionDelta = (diaboloPosition - movement.startOffset) * movement.direction;
-
-				if (movement.step == ACCELERATING && positionDelta > movement.accDistance) {
-					movement.step = COASTING;
-					pidSpeed.target = -2 * movement.direction;
-				}
-
-				if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
-					movement.step = DECELERATING;
-					pidSpeed.target = LIMIT(-90, movement.decAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
-				}
-
-				if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
-
-					// If another movement is due, stop this one right away
-					if (queuedMovementCount && TIM2->CNT > queuedMovements[0].startTime){
-						movement.running = 0;
-						movement.endTimestamp = TIM2->CNT;
-					}
-
-					// Otherwise move to the 'stopping' step, where it waits for half a second until it stabilizes
-					else {
-						movement.step = STOPPING;
-						pidSpeed.target = 0;
-						movement.stoppingTimestamp = TIM2->CNT;
-					}
-				}
-
-				if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
-					movement.running = 0;
-					pidSpeed.on = 0;
-					movement.endTimestamp = TIM2->CNT;
-				}
-			}
-
-
-
-
-
-			if (BIBI_Mode == REMOTE_CONTROLLED){
-
-				// If we haven't had a message in a second, turn off the motor
-				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
-					pidSpeed.on = 0;
-					phaseVoltage = 0;
-				}
-
-
-
-				// If we got a new message
-				if (NRF_DataReady()) {
-					NRF_GetData(buffer);
-					NRF_ReceiveTimestamp = TIM2->CNT;
-					pidSpeed.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
-					pidSpeed.on = 1;
-					phaseVoltage = 5;
-					if (ABS(pidSpeed.target) > 45) phaseVoltage = 6;
-
-					// Reset speed if right shoulder button is pressed
-					if (buffer[6] & 0b01000000) speed = 0;
-				}
-			}
-
-
-			else {
-
-
-				// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
-				if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
-					lastCueStarted = 0;
-				}
-
-
-
-				if (NRF_DataReady()) {
-					NRF_GetData(buffer);
-					NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
-					NRF_ReceiveTimestamp = TIM2->CNT;
-
-
-					if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
-						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
-						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
-						if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
-						if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
-
-						// Shut down Bibi if all buttons are pressed at once
-						if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-					}
-				}
-			}
-
-
-			ENC_Update();
-
-			// Debug send command
-			if (send == 1) {
-				send = 0;
-
-				NRF_Send(buffer);
-				while (NRF_IsSending());
-			}
-
-
-			myData.a = angleFull;
-			myData.b = angleTimer / 65535.0f * 4.0f * TWO_PI;
-			myData.c = 0;
-			myData.d = 0;
-			myData.e = 0;
-
-			sendFloats(&myData);
-
-			microsUsed = TIM2->CNT - microsPrevious - microsPerReading;
-
-			microsPrevious = microsPrevious + microsPerReading;
-		}
+	// Modified main loop with timing measurements
+	while (1) {
+	    uint32_t loop_start_time = TIM2->CNT;
+
+	    // If another loop is due
+	    if (TIM2->CNT - microsPrevious >= microsPerReading) {
+
+	        // Battery Management Section
+	        TIME_FUNCTION_START();
+	        BAT_Update();
+	        TIME_FUNCTION_END(timing_profile.battery_update_time);
+
+	        TIME_FUNCTION_START();
+	        BAT_VoltageToRGB(BAT.voltage);
+	        TIME_FUNCTION_END(timing_profile.battery_led_time);
+
+	        TIME_FUNCTION_START();
+	        CHG_RunLogic();
+	        TIME_FUNCTION_END(timing_profile.charge_logic_time);
+
+	        // Low battery and button checks
+	        TIME_FUNCTION_START();
+	        if (TIM2->CNT > 1000000) {
+	            BAT_CheckLowShutdown();
+	        }
+	        TIME_FUNCTION_END(timing_profile.low_battery_check_time);
+
+	        TIME_FUNCTION_START();
+	        if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) {
+	            HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+	        }
+	        TIME_FUNCTION_END(timing_profile.button_check_time);
+
+	        // IMU Section
+	        TIME_FUNCTION_START();
+	        sensorXYZFloat gyro_data;
+	        imu_data.accel = icm42670_read_accel_gyro(&imu, &gyro_data);
+	        imu_data.gyro = gyro_data;
+	        TIME_FUNCTION_END(timing_profile.imu_read_time);
+
+	        TIME_FUNCTION_START();
+	        imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
+	        imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
+	        imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
+	        TIME_FUNCTION_END(timing_profile.gyro_offset_time);
+
+	        TIME_FUNCTION_START();
+	        filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x,
+	                        imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
+	        TIME_FUNCTION_END(timing_profile.madgwick_filter_time);
+
+	        // Angle Calculations
+	        TIME_FUNCTION_START();
+	        madgwick.currentAngle = filter.getRoll();
+	        madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
+	        madgwick.anglePrev = madgwick.currentAngle;
+
+	        // Detect wrap-around and update turn counter
+	        if      (madgwick.angleDelta >  180.0f) madgwick.turns--;
+	        else if (madgwick.angleDelta < -180.0f) madgwick.turns++;
+
+	        madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
+	        motorAngleFull = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
+	        TIME_FUNCTION_END(timing_profile.angle_calculations_time);
+
+	        // Diabolo Calculations
+	        TIME_FUNCTION_START();
+	        diaboloAngleFull = motorAngleFull + madgwick.angleFull;
+	        diaboloPosition = diaboloAngleFull / 360.0f * DIABOLO_CIRCUMFERENCE;
+	        diaboloSpeed = SPEED_ALPHA * (diaboloPosition - lastDiaboloPosition) * 1000.0f + (1.0f - SPEED_ALPHA) * diaboloSpeed;
+	        diaboloAcceleration = ACCEL_ALPHA * (diaboloSpeed - lastDiaboloSpeed) * 1000.0f + (1.0f - ACCEL_ALPHA) * diaboloAcceleration;
+	        lastDiaboloPosition = diaboloPosition;
+	        lastDiaboloSpeed = diaboloSpeed;
+	        TIME_FUNCTION_END(timing_profile.diabolo_calculations_time);
+
+	        // Debug Movement Queue (15 seconds after startup)
+	        TIME_FUNCTION_START();
+	        static int moved = 0;
+	        if (!moved && TIM2->CNT > 15000000) {
+	            moved = 1;
+	            queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
+	            queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
+	            queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
+	            queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
+	            queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
+	            queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
+	        }
+	        TIME_FUNCTION_END(timing_profile.movement_queue_time);
+
+	        // Movement Queue Processing
+	        TIME_FUNCTION_START();
+	        if (queuedMovementCount && !movement.running) {
+	            if (TIM2->CNT > queuedMovements[0].startTime) {
+	                startMovement(queuedMovements[0]);
+	                memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
+	                memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
+	                queuedMovementCount--;
+	            }
+	        }
+	        TIME_FUNCTION_END(timing_profile.movement_start_time);
+
+	        // Movement Execution Logic
+	        TIME_FUNCTION_START();
+	        if (movement.start) {
+	            movement.start = 0;
+	            movement.startTimestamp = TIM2->CNT;
+	            movement.running = 1;
+	            movement.step = ACCELERATING;
+	            movement.startOffset = diaboloPosition;
+	            pidSpeed.target = LIMIT(-90, -movement.accAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
+	            pidSpeed.on = 1;
+	        }
+
+	        if (movement.running) {
+	            float positionDelta = (diaboloPosition - movement.startOffset) * movement.direction;
+
+	            if (movement.step == ACCELERATING && positionDelta > movement.accDistance) {
+	                movement.step = COASTING;
+	                pidSpeed.target = -2 * movement.direction;
+	            }
+
+	            if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
+	                movement.step = DECELERATING;
+	                pidSpeed.target = LIMIT(-90, movement.decAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
+	            }
+
+	            if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
+	                if (queuedMovementCount && TIM2->CNT > queuedMovements[0].startTime) {
+	                    movement.running = 0;
+	                    movement.endTimestamp = TIM2->CNT;
+	                } else {
+	                    movement.step = STOPPING;
+	                    pidSpeed.target = 0;
+	                    movement.stoppingTimestamp = TIM2->CNT;
+	                }
+	            }
+
+	            if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
+	                movement.running = 0;
+	                pidSpeed.on = 0;
+	                movement.endTimestamp = TIM2->CNT;
+	            }
+	        }
+	        TIME_FUNCTION_END(timing_profile.movement_execution_time);
+
+	        // Remote Control Processing
+	        TIME_FUNCTION_START();
+	        if (BIBI_Mode == REMOTE_CONTROLLED) {
+	            if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000) {
+	                pidSpeed.on = 0;
+	                phaseVoltage = 0;
+	            }
+
+	            if (NRF_DataReady()) {
+	                NRF_GetData(buffer);
+	                NRF_ReceiveTimestamp = TIM2->CNT;
+	                pidSpeed.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
+	                pidSpeed.on = 1;
+	                phaseVoltage = 5;
+	                if (ABS(pidSpeed.target) > 45) phaseVoltage = 6;
+
+	                if (buffer[6] & 0b01000000) speed = 0;
+	            }
+	        }
+	        TIME_FUNCTION_END(timing_profile.remote_control_time);
+
+	        // NRF Data Processing (Non-Remote Mode)
+	        TIME_FUNCTION_START();
+	        if (BIBI_Mode != REMOTE_CONTROLLED) {
+	            if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000) {
+	                lastCueStarted = 0;
+	            }
+	        }
+	        TIME_FUNCTION_END(timing_profile.nrf_data_processing_time);
+
+	        // Cue Processing
+	        TIME_FUNCTION_START();
+	        if (NRF_DataReady() && BIBI_Mode != REMOTE_CONTROLLED) {
+	            NRF_GetData(buffer);
+	            NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
+	            NRF_ReceiveTimestamp = TIM2->CNT;
+
+	            if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)) {
+	                if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
+	                if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
+	                if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
+	                if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
+
+	                if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+	            }
+	        }
+	        TIME_FUNCTION_END(timing_profile.cue_processing_time);
+
+	        // Encoder Update
+	        TIME_FUNCTION_START();
+	        ENC_Update();
+	        TIME_FUNCTION_END(timing_profile.encoder_update_time);
+
+	        // Debug Send
+	        TIME_FUNCTION_START();
+	        if (send == 1) {
+	            send = 0;
+	            NRF_Send(buffer);
+	            while (NRF_IsSending());
+	        }
+	        TIME_FUNCTION_END(timing_profile.debug_send_time);
+
+	        // Data Output
+	        TIME_FUNCTION_START();
+	        myData.a = angleFull;
+	        myData.b = angleTimer / 65535.0f * 4.0f * TWO_PI;
+	        myData.c = 0;
+	        myData.d = 0;
+	        myData.e = 0;
+	        sendFloats(&myData);
+	        TIME_FUNCTION_END(timing_profile.data_output_time);
+
+	        // Miscellaneous Calculations
+	        TIME_FUNCTION_START();
+	        microsUsed = TIM2->CNT - microsPrevious - microsPerReading;
+	        microsPrevious = microsPrevious + microsPerReading;
+	        TIME_FUNCTION_END(timing_profile.misc_calculations_time);
+	    }
+
+	    timing_profile.total_loop_time = TIM2->CNT - loop_start_time;
 	}
 }
 
