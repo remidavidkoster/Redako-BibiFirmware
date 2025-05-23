@@ -1,13 +1,13 @@
 #include "main.h"
 #include "adc.h"
-#include "i2c.h"
+#include "dma.h"
+#include "spi.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "spi.h"
 
 #include <string.h>
-#include "ICM-42670-P.h"
+//#include "ICM-42670-P.h"
 #include "NRF24L01P.h"
 #include "math.h"
 #include "MadgwickAHRS.h"
@@ -99,6 +99,7 @@ uint32_t lastRawAngle = 0;
 float velocity=0.0f;
 float angle_prev=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
 float angleFull=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
+float angleTimer;
 
 float zero_electric_angle;
 
@@ -114,17 +115,12 @@ const int32_t sensor_direction = 1;
 
 
 void ENC_Update(){
-	HAL_SPI_DeInit(&hspi2);
-	hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;   // or HIGH
-	hspi2.Init.CLKPhase    = SPI_PHASE_2EDGE;    // or 2EDGE
-	HAL_SPI_Init(&hspi2);
-
-	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)0);
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
 
 	txData[0] = 0b1010 << 4;
 	txData[1] = 0x03;
 
-	HAL_SPI_TransmitReceive(&hspi2, txData, rxData, 6, HAL_MAX_DELAY);
+	HAL_SPI_TransmitReceive(&hspi3, txData, rxData, 6, HAL_MAX_DELAY);
 
 	lastRawAngle = 0;
 
@@ -133,7 +129,7 @@ void ENC_Update(){
 	lastRawAngle |= ((uint32_t)(rxData[1 + 2]) << 5); // Middle 8 bits (ANGLE[12:5])
 	lastRawAngle |= ((uint32_t)(rxData[2 + 2]) & 0b11111000) >> 3; // Lower 5 bits (ANGLE[4:0])
 
-	HAL_GPIO_WritePin(ENC_CSN_GPIO_Port, ENC_CSN_Pin, (GPIO_PinState)1);
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)1);
 
 	float val = (2097151 - lastRawAngle) * 0.00000299605622633914f;
 	//	    angle_prev_ts = TIM6->CNT;
@@ -144,11 +140,32 @@ void ENC_Update(){
 
 	angleFull = (float)full_rotations * _2PI + angle_prev;
 
+	angleTimer = TIM4->CNT;
+
 	// The MT6835 SPI uses mode=3 (CPOL=1, CPHA=1) to exchange data.
 	// The NRF SPI uses (CPOL=0, CPHA=0) to exchange data.
 }
 
+void ENC_Setup(){
+	// Set ABZ resolution to highest setting (4096 ppr / 16384 spr)
+	txData[0] = 0b0110 << 4;
+	txData[1] = 0x07;
+	txData[2] = 0xFF;
 
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
+	HAL_SPI_TransmitReceive(&hspi3, txData, rxData, 3, HAL_MAX_DELAY);
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)1);
+
+	txData[0] = 0b0110 << 4;
+	txData[1] = 0x08;
+	txData[2] = 0b11110000;
+
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
+	HAL_SPI_TransmitReceive(&hspi3, txData, rxData, 3, HAL_MAX_DELAY);
+	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)1);
+
+
+}
 
 
 
@@ -314,8 +331,7 @@ unsigned long microsPerReading, microsPrevious, microsUsed;
 
 
 
-uint16_t adc1_buffer[2];
-uint16_t adc2_buffer[3];
+
 
 
 
@@ -331,15 +347,18 @@ int main(void) {
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
-	MX_I2C2_Init();
+	MX_DMA_Init();
 	MX_TIM1_Init();
-	MX_TIM6_Init();
 	MX_ADC1_Init();
-	MX_SPI2_Init();
-	MX_ADC2_Init();
-	MX_TIM3_Init();
 	MX_USART2_UART_Init();
 	MX_TIM2_Init();
+	MX_ADC2_Init();
+	MX_TIM6_Init();
+	MX_SPI2_Init();
+	MX_SPI1_Init();
+	MX_SPI3_Init();
+	MX_TIM4_Init();
+	MX_TIM8_Init();
 
 
 
@@ -347,38 +366,7 @@ int main(void) {
 	HAL_TIM_Base_Start(&htim2);
 
 
-
-	/// Do ADC Stuff
-
-
-
-
-	// Set VREF to 2.5V
-	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
-
-
-
-	ADC1->CR |= ADC_CR_ADCAL;
-	while (ADC1->CR & ADC_CR_ADCAL);  // Wait until calibration is done
-
-	ADC2->CR |= ADC_CR_ADCAL;
-	while (ADC2->CR & ADC_CR_ADCAL);  // Wait until calibration is done
-
-
-	// Start ADC with DMA
-	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_buffer, 2);
-
-	// Start ADC with DMA
-	HAL_ADC_Start_DMA(&hadc2, (uint32_t*)adc2_buffer, 3);
-
-
-
-
-
-
-	ADC.vrefintCal = *VREFINT_CAL_ADDR;
-	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
-
+	ADC_Init();
 
 
 	// RGB Led PWM Channels
@@ -386,6 +374,8 @@ int main(void) {
 	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
 
+
+	HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
 
 
 	// Charge power only, no button pressed
@@ -414,10 +404,10 @@ int main(void) {
 
 
 	//ICM42670 Init, etup rate & scale
-	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2);
-	icm42670_mclk_on(&imu);
-	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	//	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2);
+	//	icm42670_mclk_on(&imu);
+	//	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
+	//	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
 
 
@@ -435,10 +425,12 @@ int main(void) {
 
 
 
+	ENC_Setup();
+
+
 
 	// Enable motor stuff
-	HAL_GPIO_WritePin(DRIVER_ENABLE1_GPIO_Port, DRIVER_ENABLE1_Pin, (GPIO_PinState)1);
-	HAL_GPIO_WritePin(BOOST_ENABLE_GPIO_Port, BOOST_ENABLE_Pin, (GPIO_PinState)1);
+	HAL_GPIO_WritePin(MOT_ENABLE_GPIO_Port, MOT_ENABLE_Pin, (GPIO_PinState)1);
 
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
@@ -475,7 +467,7 @@ int main(void) {
 	microsPrevious = TIM2->CNT;
 
 	// Start main motor interrupt
-	HAL_TIM_Base_Start_IT(&htim6);
+	//	HAL_TIM_Base_Start_IT(&htim6);
 
 
 	while (1)  {
@@ -504,28 +496,28 @@ int main(void) {
 
 
 
-			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
-			imu_data.accel = icm42670_read_accel(&imu);
-			imu_data.gyro = icm42670_read_gyro(&imu);
+			//			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
+			//			imu_data.accel = icm42670_read_accel(&imu);
+			//			imu_data.gyro = icm42670_read_gyro(&imu);
+			//
+			//			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
+			//			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
+			//			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
+			//
+			//			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
+			//			filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
 
-			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
-			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
-			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
-
-			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
-			filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
-
-			// Get the roll angle
-			madgwick.currentAngle = filter.getRoll();
-			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
-			madgwick.anglePrev = madgwick.currentAngle;
-
-			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
-			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
-			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
-
-			// Compute total angle
-			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
+//			// Get the roll angle
+//			madgwick.currentAngle = filter.getRoll();
+//			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
+//			madgwick.anglePrev = madgwick.currentAngle;
+//
+//			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
+//			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
+//			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
+//
+//			// Compute total angle
+//			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
 
 
 
@@ -700,8 +692,8 @@ int main(void) {
 			}
 
 
-			myData.a = phaseVoltage;
-			myData.b = madgwick.currentAngle;
+			myData.a = angleFull;
+			myData.b = angleTimer / 65535.0f * 4.0f * TWO_PI;
 			myData.c = 0;
 			myData.d = 0;
 			myData.e = 0;
@@ -716,7 +708,8 @@ int main(void) {
 }
 
 
-void SystemClock_Config(void){
+void SystemClock_Config(void)
+{
 	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
 	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -727,12 +720,10 @@ void SystemClock_Config(void){
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSI48;
-	RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-	RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-	RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
 	RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV4;
 	RCC_OscInitStruct.PLL.PLLN = 85;
 	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;

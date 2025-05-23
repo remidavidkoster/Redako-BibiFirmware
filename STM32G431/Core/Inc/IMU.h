@@ -17,10 +17,10 @@
 /// Accelerometer stuff
 
 typedef struct {
-	sensorXYZFloat accel;
-	sensorXYZFloat gyro;
-	sensorXYZFloat gyroZerod;
-	sensorXYZFloat lastGyro;
+//	sensorXYZFloat accel;
+//	sensorXYZFloat gyro;
+//	sensorXYZFloat gyroZerod;
+//	sensorXYZFloat lastGyro;
 
 	float rawAngle, angle, anglePrev, angleFull;
 
@@ -29,7 +29,7 @@ typedef struct {
 
 IMU_Data imu_data;  // Array to store data for two IMUs
 
-ICM42670 imu;
+//ICM42670 imu;
 
 uint8_t failed;
 
@@ -40,7 +40,7 @@ uint8_t failed;
 
 Madgwick filter;
 
-#define SAMPLE_FREQUENCY 1000
+#define SAMPLE_FREQUENCY 4000
 
 typedef struct {
 	volatile float angleFull;
@@ -107,16 +107,16 @@ void waitForStableGetGyroOffsets(){
 	while (1) {
 
 		// Read current IMU data
-		imu_data.accel = icm42670_read_accel(&imu);
-		imu_data.gyro = icm42670_read_gyro(&imu);
+//		imu_data.accel = icm42670_read_accel(&imu);
+//		imu_data.gyro = icm42670_read_gyro(&imu);
 
 		// Update the rolling buffers at the current position
-		accel_x_buffer[buffer_pos] = imu_data.accel.x;
-		accel_y_buffer[buffer_pos] = imu_data.accel.y;
-		accel_z_buffer[buffer_pos] = imu_data.accel.z;
-		gyro_x_buffer[buffer_pos] = imu_data.gyro.x;
-		gyro_y_buffer[buffer_pos] = imu_data.gyro.y;
-		gyro_z_buffer[buffer_pos] = imu_data.gyro.z;
+//		accel_x_buffer[buffer_pos] = imu_data.accel.x;
+//		accel_y_buffer[buffer_pos] = imu_data.accel.y;
+//		accel_z_buffer[buffer_pos] = imu_data.accel.z;
+//		gyro_x_buffer[buffer_pos] = imu_data.gyro.x;
+//		gyro_y_buffer[buffer_pos] = imu_data.gyro.y;
+//		gyro_z_buffer[buffer_pos] = imu_data.gyro.z;
 
 		// Increment samples collected (up to NUM_SAMPLES)
 		if (samples_collected < NUM_SAMPLES) {

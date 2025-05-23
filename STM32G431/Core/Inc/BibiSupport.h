@@ -10,16 +10,17 @@
 
 
 
-
+uint16_t ADC1_Buffer[2];
+uint16_t ADC2_Buffer[3];
 
 /// RGB LED Stuff
 
 #define RGB_PWM_MAX 8499
 
 void RGB_Set(float r, float g, float b){
-	TIM8->CCR3 = RGB_PWM_MAX - r * RGB_PWM_MAX;
-	TIM8->CCR1 = RGB_PWM_MAX - g * RGB_PWM_MAX;
-	TIM8->CCR2 = RGB_PWM_MAX - b * RGB_PWM_MAX;
+	TIM8->CCR1 = RGB_PWM_MAX - r * RGB_PWM_MAX;
+	TIM8->CCR2 = RGB_PWM_MAX - g * RGB_PWM_MAX;
+	TIM8->CCR3 = RGB_PWM_MAX - b * RGB_PWM_MAX;
 }
 
 // Voltage thresholds for color transitions
@@ -79,6 +80,46 @@ struct ADC {
 
 
 
+void ADC_Init(){
+
+	/// Do ADC Stuff
+
+
+
+
+	// Set VREF to 2.5V
+	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
+
+
+
+	ADC1->CR |= ADC_CR_ADCAL;
+	while (ADC1->CR & ADC_CR_ADCAL);  // Wait until calibration is done
+
+	ADC2->CR |= ADC_CR_ADCAL;
+	while (ADC2->CR & ADC_CR_ADCAL);  // Wait until calibration is done
+
+
+	// Start ADC with DMA
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)ADC1_Buffer, 2);
+
+	// Start ADC with DMA
+	HAL_ADC_Start_DMA(&hadc2, (uint32_t*)ADC2_Buffer, 3);
+
+
+
+
+
+
+	ADC.vrefintCal = *VREFINT_CAL_ADDR;
+	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
+
+}
+
+
+
+
+
+
 /// Battery Stuff
 
 struct BAT {
@@ -93,8 +134,8 @@ struct CHG {
 } CHG;
 
 void BAT_Update(){
-	ADC.valueVRefInt = ADC1->DR;
-	ADC.valueBattery = ADC2->DR;
+	ADC.valueVRefInt = ADC1_Buffer[1];
+	ADC.valueBattery = ADC1_Buffer[0];
 	BAT.voltage = (float)ADC.valueBattery / (float)ADC.valueVRefInt * ADC.vrefintVoltage * ADC.BAT_VOLTAGE_DIVIDER_RATIO;
 }
 
@@ -112,9 +153,9 @@ void BAT_CheckLowShutdown(){
 void CHG_RunLogic(){
 
 	// Charge stuff
-	CHG.standby = !HAL_GPIO_ReadPin(STDBY_GPIO_Port, STDBY_Pin);
-	CHG.charging = !HAL_GPIO_ReadPin(CHRG_GPIO_Port, CHRG_Pin);
-	CHG.plugged = HAL_GPIO_ReadPin(VBUS_PRESENT_GPIO_Port, VBUS_PRESENT_Pin);
+//	CHG.standby = !HAL_GPIO_ReadPin(STDBY_GPIO_Port, STDBY_Pin);
+//	CHG.charging = !HAL_GPIO_ReadPin(CHRG_GPIO_Port, CHRG_Pin);
+//	CHG.plugged = HAL_GPIO_ReadPin(VBUS_PRESENT_GPIO_Port, VBUS_PRESENT_Pin);
 	CHG.enabled = BAT.voltage > 2.75f;
 
 	// Charge enable logic
