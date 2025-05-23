@@ -7,7 +7,7 @@
 #include "gpio.h"
 
 #include <string.h>
-//#include "ICM-42670-P.h"
+#include "ICM-42670-P.h"
 #include "NRF24L01P.h"
 #include "math.h"
 #include "MadgwickAHRS.h"
@@ -404,10 +404,10 @@ int main(void) {
 
 
 	//ICM42670 Init, etup rate & scale
-	//	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hi2c2);
-	//	icm42670_mclk_on(&imu);
-	//	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	//	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hspi1);
+	icm42670_mclk_on(&imu);
+	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
 
 
 
@@ -496,28 +496,28 @@ int main(void) {
 
 
 
-			//			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
-			//			imu_data.accel = icm42670_read_accel(&imu);
-			//			imu_data.gyro = icm42670_read_gyro(&imu);
-			//
-			//			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
-			//			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
-			//			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
-			//
-			//			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
-			//			filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
+			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
+			imu_data.accel = icm42670_read_accel(&imu);
+			imu_data.gyro = icm42670_read_gyro(&imu);
 
-//			// Get the roll angle
-//			madgwick.currentAngle = filter.getRoll();
-//			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
-//			madgwick.anglePrev = madgwick.currentAngle;
-//
-//			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
-//			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
-//			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
-//
-//			// Compute total angle
-//			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
+			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
+			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
+			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
+
+			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
+			filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
+
+			// Get the roll angle
+			madgwick.currentAngle = filter.getRoll();
+			madgwick.angleDelta = madgwick.currentAngle - madgwick.anglePrev;
+			madgwick.anglePrev = madgwick.currentAngle;
+
+			// Detect wrap-around and update turn counter (Commented out now that we again don't have any feedback)
+			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
+			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
+
+			// Compute total angle
+			madgwick.angleFull = madgwick.currentAngle + 360.0f * madgwick.turns;
 
 
 
