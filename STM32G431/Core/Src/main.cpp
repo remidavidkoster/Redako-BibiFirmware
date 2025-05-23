@@ -497,8 +497,9 @@ int main(void) {
 
 
 			// Read accelerometer and gyro data for IMU B (6.7mm offset above point of rotation. X+ is down. Y+ to the is right.)
-			imu_data.accel = icm42670_read_accel(&imu);
-			imu_data.gyro = icm42670_read_gyro(&imu);
+			sensorXYZFloat gyro_data;
+			imu_data.accel = icm42670_read_accel_gyro(&imu, &gyro_data);
+			imu_data.gyro = gyro_data;
 
 			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
 			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];

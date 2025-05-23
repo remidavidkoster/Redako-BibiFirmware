@@ -185,7 +185,7 @@ sensorXYZFloat icm42670_read_accel_gyro(ICM42670 *sensor, sensorXYZFloat *gyro_o
     sensorXYZFloat accel_out = {0};
 
     // Set first byte: register address with read bit (0x1F | 0x80 = 0x9F)
-    tx[0] = 0x1F | 0x80;
+    tx[0] = ICM42670_REG_ACCEL_DATA_X1 | 0x80;
 
     HAL_GPIO_WritePin(SPI1_CSN_GPIO_Port, SPI1_CSN_Pin, GPIO_PIN_RESET);
     HAL_SPI_TransmitReceive(&hspi1, tx, rx, 13, HAL_MAX_DELAY);
