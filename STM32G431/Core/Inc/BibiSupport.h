@@ -17,9 +17,9 @@
 #define RGB_PWM_MAX 8499
 
 void RGB_Set(float r, float g, float b){
-	TIM3->CCR3 = RGB_PWM_MAX - r * RGB_PWM_MAX;
-	TIM3->CCR1 = RGB_PWM_MAX - g * RGB_PWM_MAX;
-	TIM3->CCR2 = RGB_PWM_MAX - b * RGB_PWM_MAX;
+	TIM8->CCR3 = RGB_PWM_MAX - r * RGB_PWM_MAX;
+	TIM8->CCR1 = RGB_PWM_MAX - g * RGB_PWM_MAX;
+	TIM8->CCR2 = RGB_PWM_MAX - b * RGB_PWM_MAX;
 }
 
 // Voltage thresholds for color transitions

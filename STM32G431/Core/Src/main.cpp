@@ -314,6 +314,8 @@ unsigned long microsPerReading, microsPrevious, microsUsed;
 
 
 
+uint16_t adc1_buffer[2];
+uint16_t adc2_buffer[3];
 
 
 
@@ -348,8 +350,13 @@ int main(void) {
 
 	/// Do ADC Stuff
 
+
+
+
 	// Set VREF to 2.5V
 	HAL_SYSCFG_VREFBUF_VoltageScalingConfig(SYSCFG_VREFBUF_VOLTAGE_SCALE2);
+
+
 
 	ADC1->CR |= ADC_CR_ADCAL;
 	while (ADC1->CR & ADC_CR_ADCAL);  // Wait until calibration is done
@@ -357,8 +364,17 @@ int main(void) {
 	ADC2->CR |= ADC_CR_ADCAL;
 	while (ADC2->CR & ADC_CR_ADCAL);  // Wait until calibration is done
 
-	HAL_ADC_Start(&hadc1);
-	HAL_ADC_Start(&hadc2);
+
+	// Start ADC with DMA
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_buffer, 2);
+
+	// Start ADC with DMA
+	HAL_ADC_Start_DMA(&hadc2, (uint32_t*)adc2_buffer, 3);
+
+
+
+
+
 
 	ADC.vrefintCal = *VREFINT_CAL_ADDR;
 	ADC.vrefintVoltage = ((float)ADC.vrefintCal / 4095.0f) * 3.0f;
@@ -366,9 +382,9 @@ int main(void) {
 
 
 	// RGB Led PWM Channels
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
 
 
 
