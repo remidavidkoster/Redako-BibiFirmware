@@ -331,7 +331,8 @@ unsigned long microsPerReading, microsPrevious, microsUsed;
 
 
 
-
+int8_t right;
+int8_t backwards;
 
 
 
@@ -392,7 +393,7 @@ int main(void) {
 	}
 
 	// If second button is pressed during startup, this will be remote controlled
-	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
+	if (1){//!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
 		BIBI_Mode = REMOTE_CONTROLLED;
 	}
 
@@ -417,7 +418,7 @@ int main(void) {
 	} else {
 		configNRFTCMfx();
 
-		PID_AngleWithSpeed.on = 1;
+//		PID_AngleWithSpeed.on = 1;
 //		phaseVoltage = 2;
 		PID_AngleWithSpeed.target = 0;
 	}
@@ -641,10 +642,17 @@ int main(void) {
 				if (NRF_DataReady()) {
 					NRF_GetData(buffer);
 					NRF_ReceiveTimestamp = TIM2->CNT;
-					PID_AngleWithSpeed.target = -fix_joystick(buffer[3]) * 60.0f / 127.0f;
+
+					right = fix_joystick(buffer[3]);
+					backwards = fix_joystick(buffer[1]);
+
+
+
+					if (BIBI_Number == 6) PID_AngleWithSpeed.target = (-backwards * 0.8f - right * 0.4f) * 60.0f / 127.0f;
+					if (BIBI_Number == 7) PID_AngleWithSpeed.target = (backwards * 0.8f - right * 0.4f) * 60.0f / 127.0f;
 					PID_AngleWithSpeed.on = 1;
-					phaseVoltage = 5;
-					if (ABS(PID_AngleWithSpeed.target) > 45) phaseVoltage = 6;
+//					phaseVoltage = 5;
+//					if (ABS(PID_AngleWithSpeed.target) > 45) phaseVoltage = 6;
 
 					// Reset speed if right shoulder button is pressed
 					if (buffer[6] & 0b01000000) speed = 0;
