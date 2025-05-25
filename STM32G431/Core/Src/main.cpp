@@ -97,7 +97,7 @@ typedef struct {
 
 	float target;
 	float lastTarget;
-    float reset_threshold;
+	float reset_threshold;
 
 	float on;
 } PIDController;
@@ -110,7 +110,9 @@ volatile PIDController PID_WeightAngleWithMotorSpeed = {
 		.alpha = 0.001f,
 		.limit = 30.0f,
 		.target = 0.0f,
-		.reset_threshold = 5.0f
+		.reset_threshold = 5.0f,
+
+		.on = 1
 };
 
 volatile PIDController PID_MotorPositionWithVoltage = {
@@ -170,6 +172,7 @@ float speedTarget;
 float lastSpeedTarget;
 
 float accelerationTarget;
+float accelerationTargetFiltered;
 
 /// Main 10kHz pidSpeed loop
 
@@ -230,8 +233,7 @@ int8_t backwards;
 
 
 // -- Constants --
-float dt = 0.0001f;          // Loop interval (100 µs)
-float alpha = 0.0004f;         // Filter smoothing factor (tweak as needed)
+float accelerationTargetAlpha = 0.0004f;         // Filter smoothing factor (tweak as needed)
 float K_ff = -80.0f;           // Feedforward gain (start small)
 
 
@@ -408,33 +410,8 @@ int main(void) {
 			// Button shut down
 			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 
-
-
-
-
-			// Read accelerometer and gyro data
-			sensorXYZFloat gyro_data;
-			imu_data.accel = icm42670_read_accel_gyro(&imu, &gyro_data);
-			imu_data.gyro = gyro_data;
-
-			imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
-			imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
-			imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
-
-			// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
-			filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
-
-			// Get the roll angle
-			madgwick.currentAngleDeg = filter.getRoll();
-			madgwick.angleDelta = madgwick.currentAngleDeg - madgwick.anglePrev;
-			madgwick.anglePrev = madgwick.currentAngleDeg;
-
-			// Detect wrap-around and update turn counter
-			if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
-			else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
-
-			// Compute total angle
-			madgwick.angleFullDeg = madgwick.currentAngleDeg + 360.0f * madgwick.turns;
+			// Get IMU data and update Madgwick filter
+			MAD_Update();
 
 
 
@@ -487,43 +464,48 @@ int main(void) {
 					movement.startTimestamp = TIM2->CNT;
 					movement.running = 1;
 
+					// Set the last target as offset, so we won't slowly drift.
 					movement.startOffset = lastPositionTarget;
 
-
-
+					// Calculate the motion times from the distance, acceleration, and speed we've set.
 					distanceSpeedRampRatioToProfileTimes(p);
 
+					// Turn on the PID
 					PID_WeightAngleWithMotorSpeed.on = 1;
 				}
 
-				if (movement.running) {
 
+				if (movement.running){
 					float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
 
+					// Calculate position and speed targets
 					positionTarget = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed));
 					speedTarget = (positionTarget - lastPositionTarget) * SAMPLE_FREQUENCY;
 					lastPositionTarget = positionTarget;
 
-
-					if (runTime >= p.totalTime + 1.0f) {
+					// If we've passed the runtime, stop 'movement' (the PIDs still try to hold the current position)
+					if (runTime >= p.totalTime) {
 						movement.running = 0;
 						movement.direction = -movement.direction;
 					}
 				}
 
+				// Pass position target to position PID
+				PID_BibiPositionWithBibiSpeed.target = positionTarget;
 
-				// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
-				if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
-					lastCueStarted = 0;
-				}
+				// Pass calculated speed target + PID result to speed PID
+				PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
 
 
+
+
+				// Check radio
 				if (NRF_DataReady()) {
 					NRF_GetData(buffer);
 					NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 					NRF_ReceiveTimestamp = TIM2->CNT;
 
-
+					// Start cues if we have to
 					if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
 						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
 						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
@@ -534,6 +516,11 @@ int main(void) {
 						if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 					}
 				}
+
+				// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
+				if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
+					lastCueStarted = 0;
+				}
 			}
 
 
@@ -541,12 +528,6 @@ int main(void) {
 
 
 			else if (BIBI_Mode == REMOTE_CONTROLLED){
-
-				// If we haven't had a message in a second, turn off the motor
-				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
-					PID_WeightAngleWithMotorSpeed.on = 0;
-					phaseVoltage = 0;
-				}
 
 				// If we got a new message
 				if (NRF_DataReady()) {
@@ -561,91 +542,78 @@ int main(void) {
 
 						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
 						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
-	//
 						if (BIBI_Number == 8) PID_BibiSpeedWithWeightAngle.target = right / 100.0f;
-//						if (BIBI_Number == 8) PID_WeightAngleWithMotorSpeed.target = right * 120.0f / 127.0f;
+						// if (BIBI_Number == 8) PID_WeightAngleWithMotorSpeed.target = right * 120.0f / 127.0f;
 
 
 						PID_WeightAngleWithMotorSpeed.on = 1;
-
-						// Reset speed if right shoulder button is pressed
-						if (buffer[6] & 0b01000000) motorSpeedTarget = 0;
 					}
+				}
+
+
+				// If we haven't had a message in a second, turn off the motor
+				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
+					PID_WeightAngleWithMotorSpeed.on = 0;
+					phaseVoltage = 0;
 				}
 			}
 
 
 
 
+
+			// Calculate and filter acceleration target
+			accelerationTarget = (PID_BibiSpeedWithWeightAngle.target - lastSpeedTarget) * SAMPLE_FREQUENCY;
+			lastSpeedTarget = PID_BibiSpeedWithWeightAngle.target;
+
+			// Changed this without re-testing. Should be better to apply the feed forward acceleration to the full speed setpoint
+			// accelerationTarget = (speedTarget - lastSpeedTarget) * SAMPLE_FREQUENCY;
+
+			// Filter target acceleration (more relevant for remote than for quintic curves
+			accelerationTargetFiltered = (1.0f - accelerationTargetAlpha) * accelerationTargetFiltered + accelerationTargetAlpha * accelerationTarget;
+
+
+			// Add filtered derivative-based feedforward to angle to help drive acceleration
+			float angleFeedForward = K_ff * accelerationTargetFiltered;
+
+			// Steady state conversion formula didn't seem to help a lot
+			// float angleFeedForward = K_ff * computeAngle(accelerationTargetFiltered);
+
+
+			// Update encoder
 			ENC_Update();
 
+			// Set angle target based on acceleration feed forward and diabolo speed PID
+			PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
 
+			// Set motor speed target with angle PID
+			motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
 
+			// Limit motor speed (might not be necessary anymore with encoders)
+			motorSpeedTarget = LIMIT(-PID_WeightAngleWithMotorSpeed.limit, motorSpeedTarget, PID_WeightAngleWithMotorSpeed.limit);
 
-			PID_BibiPositionWithBibiSpeed.target = positionTarget;
-
-			PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
-
-
-			static float speed_target = 0.0f;
-			static float last_speed_target = 0.0f;
-			static float accelerationFiltered = 0.0f;
-
-			speed_target = PID_BibiSpeedWithWeightAngle.target;
-
-			float acceleration = (speed_target - last_speed_target) / dt;
-			last_speed_target = speed_target;
-
-			// 3. Apply low-pass filter to derivative
-			accelerationFiltered = (1.0f - alpha) * accelerationFiltered + alpha * acceleration;
-
-			// Add filtered derivative-based feedforward to help drive acceleration
-//			float angle_ff = K_ff * computeAngle(accelerationFiltered);  // from previous steps
-			float angle_ff = K_ff * accelerationFiltered;  // from previous steps
+			// Set electrical angle target through desired motor speed
+			electricalAngleTarget += motorSpeedTarget * POLE_PAIRS / (float)SAMPLE_FREQUENCY;
 
 
 
 
-
-			PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angle_ff + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
-
-
-
-			if (PID_WeightAngleWithMotorSpeed.on){
-				motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
-
-				motorSpeedTarget = LIMIT(-PID_WeightAngleWithMotorSpeed.limit, motorSpeedTarget, PID_WeightAngleWithMotorSpeed.limit);
-
-				// Speed should be in meters per second
-				electricalAngleTarget += motorSpeedTarget * POLE_PAIRS / (float)SAMPLE_FREQUENCY;
-			}
-			else {
-				motorSpeedTarget = 0;
-			}
-
-
-
-
-
-
-
+			// Clip electrical angle target to 1/8 of a circle if it's gone haywire
 			if (electricalAngleTarget - ENC_LastFullAngleRad * POLE_PAIRS > PID_CLIP) electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS + PID_CLIP;
 			if (ENC_LastFullAngleRad * POLE_PAIRS - electricalAngleTarget > PID_CLIP) electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS - PID_CLIP;
 
 
-
+			// Pass electrical angle target to motor position controller
 			PID_MotorPositionWithVoltage.target = electricalAngleTarget;
 
+			// Set phase voltage with motor position controller
 			phaseVoltage = -runPID(&PID_MotorPositionWithVoltage, ENC_LastFullAngleRad * POLE_PAIRS);
 
+			// Calculate current electrical angle
 			electricalAngle = normalizeAngle((float)POLE_PAIRS * ENC_LastAngleRad - MOT_ZeroElectricAngle);
 
-			if (PID_WeightAngleWithMotorSpeed.on){
-				MOT_SetPhaseVoltage(phaseVoltage, electricalAngle);
-			}
-			else {
-				MOT_SetPhaseVoltage(0, electricalAngle);
-			}
+			// Set phase voltage (if the last PID is turned on)
+			MOT_SetPhaseVoltage(PID_WeightAngleWithMotorSpeed.on ? phaseVoltage : 0, electricalAngle);
 
 
 
@@ -654,19 +622,24 @@ int main(void) {
 
 
 
+			/// Compute diabolo stats
 
-
+			// Full motor angle since startup in degrees
 			motorAngleFullDeg = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
 
-			// Compute the angle the diabolo has made from its startup position
+			// Full diabolo rotations in degrees since startup
 			diaboloAngleFullDeg = motorAngleFullDeg + madgwick.angleFullDeg;
 
+			// Diabolo position [m] since startup
 			diaboloPosition = diaboloAngleFullDeg / 360.0f * DIABOLO_CIRCUMFERENCE;
 
+			// Diabolo speed [m/s]
 			diaboloSpeed = SPEED_ALPHA * (diaboloPosition - lastDiaboloPosition) * (float)SAMPLE_FREQUENCY + (1.0f - SPEED_ALPHA) * diaboloSpeed;
 
+			// Diabolo acceleration [m/s²]
 			diaboloAcceleration = ACCEL_ALPHA * (diaboloSpeed - lastDiaboloSpeed) * (float)SAMPLE_FREQUENCY + (1.0f - ACCEL_ALPHA) * diaboloAcceleration;
 
+			// Save last values
 			lastDiaboloPosition = diaboloPosition;
 			lastDiaboloSpeed = diaboloSpeed;
 
@@ -674,8 +647,7 @@ int main(void) {
 
 
 			// Print debug data
-
-			myData.a = speed_target;
+			myData.a = speedTarget;
 			myData.b = diaboloSpeed;
 			myData.c = positionTarget;
 			myData.d = diaboloPosition;

@@ -57,6 +57,7 @@ volatile MadgwickStruct madgwick;
 
 
 
+
 /// Gyro calib / init stuff
 
 float gyro_offsets[3] = {0.0, 0.0, 0.0}; // To store the gyro offsets
@@ -168,6 +169,35 @@ void waitForStableGetGyroOffsets(){
 		HAL_Delay(1);
 	}
 }
+
+
+void MAD_Update(){
+
+	// Read accelerometer and gyro data
+	sensorXYZFloat gyro_data;
+	imu_data.accel = icm42670_read_accel_gyro(&imu, &gyro_data);
+	imu_data.gyro = gyro_data;
+
+	imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
+	imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
+	imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
+
+	// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
+	filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
+
+	// Get the roll angle
+	madgwick.currentAngleDeg = filter.getRoll();
+	madgwick.angleDelta = madgwick.currentAngleDeg - madgwick.anglePrev;
+	madgwick.anglePrev = madgwick.currentAngleDeg;
+
+	// Detect wrap-around and update turn counter
+	if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
+	else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
+
+	// Compute total angle
+	madgwick.angleFullDeg = madgwick.currentAngleDeg + 360.0f * madgwick.turns;
+}
+
 
 
 
