@@ -554,6 +554,7 @@ int main(void) {
 						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
 	//
 						if (BIBI_Number == 8) PID_BibiSpeedWithWeightAngle.target = right / 100.0f;
+//						if (BIBI_Number == 8) PID_WeightAngleWithMotorSpeed.target = right * 120.0f / 127.0f;
 
 
 						PID_WeightAngleWithMotorSpeed.on = 1;
@@ -574,21 +575,21 @@ int main(void) {
 
 
 
-			// -- State --
 			static float speed_target = 0.0f;
 			static float last_speed_target = 0.0f;
-			static float d_speed_filtered = 0.0f;
+			static float accelerationFiltered = 0.0f;
 
 			speed_target = PID_BibiSpeedWithWeightAngle.target;
 
-			float d_speed_raw = (speed_target - last_speed_target) / dt;
+			float acceleration = (speed_target - last_speed_target) / dt;
 			last_speed_target = speed_target;
 
 			// 3. Apply low-pass filter to derivative
-			d_speed_filtered = (1.0f - alpha) * d_speed_filtered + alpha * d_speed_raw;
+			accelerationFiltered = (1.0f - alpha) * accelerationFiltered + alpha * acceleration;
 
 			// Add filtered derivative-based feedforward to help drive acceleration
-			float angle_ff = K_ff * d_speed_filtered;  // from previous steps
+//			float angle_ff = K_ff * computeAngle(accelerationFiltered);  // from previous steps
+			float angle_ff = K_ff * accelerationFiltered;  // from previous steps
 
 
 
@@ -638,6 +639,11 @@ int main(void) {
 
 
 
+
+
+
+
+
 			motorAngleFullDeg = electricalAngleTarget / POLE_PAIRS * RAD2DEG;
 
 			// Compute the angle the diabolo has made from its startup position
@@ -658,8 +664,8 @@ int main(void) {
 			// Print debug data
 
 			myData.a = speed_target;
-			myData.b = d_speed_raw;
-			myData.c = d_speed_filtered;
+			myData.b = acceleration;
+			myData.c = accelerationFiltered;
 			myData.d = angle_ff;
 			myData.e = diaboloSpeed;
 			myData.f = 0;

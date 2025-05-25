@@ -137,6 +137,32 @@ void MOT_SetPhaseVoltage(float Uq, float angle_el) {
 }
 
 
+
+
+
+
+// Function to compute Angle from Acceleration
+float computeAngle(double acceleration) {
+    return 50.583f * acceleration * acceleration * acceleration
+         - 1.8123f * acceleration * acceleration
+         + 84.643f * acceleration;
+}
+
+// Function to compute Acceleration from Angle
+float computeAcceleration(double angle) {
+    return 0.000000123339010616f * angle * angle * angle
+         - 0.000056704986980114f * angle * angle
+         + 0.012900465101017900f * angle;
+}
+
+
+
+
+
+
+
+
+
 //	setPhaseVoltage(5.65, _3PI_2);
 //	HAL_Delay(4000);
 //	ENC_Update();
