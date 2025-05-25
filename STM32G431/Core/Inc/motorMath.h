@@ -62,7 +62,7 @@ inline void _sincos(float a, float* s, float* c){
 }
 
 // normalizing radian angle to [0,2PI]
-inline float _normalizeAngle(float angle){
+inline float normalizeAngle(float angle){
 	float norm = angle - TWO_PI * ((int)(angle * _1_OVER_2PI));
 	return (norm < 0) ? (norm + TWO_PI) : norm;
 }
@@ -90,7 +90,7 @@ float phaseVoltage = 0;
 float Ua, Ub, Uc;
 
 // Main FOC Function
-void setPhaseVoltage(float Uq, float angle_el) {
+void MOT_SetPhaseVoltage(float Uq, float angle_el) {
 	float Ualpha, Ubeta, center, _ca,_sa;
 
 	// Sinusoidal PWM modulation
@@ -131,16 +131,9 @@ void setPhaseVoltage(float Uq, float angle_el) {
 	uint16_t B = LIMIT(lowerPWMLimit, dc_b, upperPWMLimit);
 	uint16_t C = LIMIT(lowerPWMLimit, dc_c, upperPWMLimit);
 
-	if (motorNumber == 0 || motorNumber == 1){
-		TIM1->CCR1 = A;
-		TIM1->CCR2 = B;
-		TIM1->CCR3 = C;
-	}
-	if (motorNumber == 0 || motorNumber == 2){
-		TIM8->CCR1 = A;
-		TIM8->CCR2 = B;
-		TIM8->CCR3 = C;
-	}
+	TIM1->CCR1 = A;
+	TIM1->CCR2 = B;
+	TIM1->CCR3 = C;
 }
 
 

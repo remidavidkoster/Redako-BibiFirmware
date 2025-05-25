@@ -43,11 +43,11 @@ Madgwick filter;
 #define SAMPLE_FREQUENCY 10000
 
 typedef struct {
-	volatile float angleFull;
+	volatile float angleFullDeg;
 	float anglePrev;
 	float angleDelta;
 	int turns;
-	float currentAngle;
+	float currentAngleDeg;
 } MadgwickStruct;
 
 volatile MadgwickStruct madgwick;
@@ -80,7 +80,7 @@ float calculate_standard_deviation(float *data, int num_samples) {
 }
 
 
-#define STABILITY_THRESHOLD 0.003f  // Threshold for accelerometer standard deviation
+#define STABILITY_THRESHOLD 0.0025f  // Threshold for accelerometer standard deviation
 #define NUM_SAMPLES 100          // Number of samples to collect for both accelerometer and gyro
 
 float accel_x_stddev;

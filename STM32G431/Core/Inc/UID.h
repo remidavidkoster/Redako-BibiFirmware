@@ -7,6 +7,9 @@
 
 #define BIBIS 8
 
+// Identification number of this bibi
+uint8_t BIBI_Number;
+
 static const uint32_t known_uids[BIBIS][3] = {
     {0x21002b, 0x5130500d, 0x2035344b},
     {0x5e003f, 0x5130500c, 0x2035344b},
