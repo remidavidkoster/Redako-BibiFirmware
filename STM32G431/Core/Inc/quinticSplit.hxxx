@@ -5,8 +5,8 @@
  *      Author: Red
  */
 
-#ifndef INC_QUINTICSPLIT_H_
-#define INC_QUINTICSPLIT_H_
+#ifndef INC_QUINTICSPLIT_HXXX_
+#define INC_QUINTICSPLIT_HXXX_
 
 /// Quintic Movement Stuff with Separate Ramp Up/Down Ratios
 
@@ -165,4 +165,4 @@ float quinticPositionProfile(float currentTime, float rampUpTime, float rampDown
     }
 }
 
-#endif /* INC_QUINTICSPLIT_H_ */
+#endif /* INC_QUINTICSPLIT_HXXX_ */

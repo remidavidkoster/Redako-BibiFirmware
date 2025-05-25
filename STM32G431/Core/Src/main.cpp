@@ -129,7 +129,7 @@ volatile PIDController PID_MotorPositionWithVoltage = {
 
 volatile PIDController PID_BibiSpeedWithWeightAngle = {
 		.p = 100.0f,
-		.i = 0.0f,
+		.i = 40.0f,
 		.d = 0.0f,
 		.alpha = 0.01f,
 		.limit = 120.0f,
@@ -142,9 +142,34 @@ volatile PIDController PID_BibiSpeedWithWeightAngle = {
 
 
 
+volatile PIDController PID_BibiPositionWithBibiSpeed = {
+		.p = -0.5f,
+		.i = 0.0f,
+		.d = 0.0f,
+		.alpha = 0.01f,
+		.limit = 5.0f,
+		.target = 0.0f,
+		.reset_threshold = 10000.0f,
+
+		.on = 1
+};
 
 
 
+
+
+
+
+
+
+
+float positionTarget;
+float lastPositionTarget;
+
+float speedTarget;
+float lastSpeedTarget;
+
+float accelerationTarget;
 
 /// Main 10kHz pidSpeed loop
 
@@ -265,7 +290,7 @@ int main(void) {
 	}
 
 	// If second button is pressed during startup, this will be remote controlled
-	if (1){//!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
+	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
 		BIBI_Mode = REMOTE_CONTROLLED;
 	}
 
@@ -344,7 +369,9 @@ int main(void) {
 
 
 
-
+	p.totalDistance = 1;
+	p.rampRatio = 1;
+	p.maxSpeed = 0.5f;
 
 
 
@@ -459,45 +486,28 @@ int main(void) {
 					movement.start = 0;
 					movement.startTimestamp = TIM2->CNT;
 					movement.running = 1;
-					movement.step = ACCELERATING;
-					movement.startOffset = diaboloPosition;
-					PID_WeightAngleWithMotorSpeed.target = LIMIT(-90, -movement.accAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
+
+					movement.startOffset = lastPositionTarget;
+
+
+
+					distanceSpeedRampRatioToProfileTimes(p);
+
 					PID_WeightAngleWithMotorSpeed.on = 1;
 				}
 
 				if (movement.running) {
-					float positionDelta = (diaboloPosition - movement.startOffset) * movement.direction;
 
-					if (movement.step == ACCELERATING && positionDelta > movement.accDistance) {
-						movement.step = COASTING;
-						PID_WeightAngleWithMotorSpeed.target = -2 * movement.direction;
-					}
+					float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
 
-					if (movement.step == COASTING && positionDelta > (movement.accDistance + movement.coastDistance)) {
-						movement.step = DECELERATING;
-						PID_WeightAngleWithMotorSpeed.target = LIMIT(-90, movement.decAngle * movement.direction, 90) * ANGLE_PD_COMP_FACTOR;
-					}
+					positionTarget = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed));
+					speedTarget = (positionTarget - lastPositionTarget) * SAMPLE_FREQUENCY;
+					lastPositionTarget = positionTarget;
 
-					if (movement.step == DECELERATING && (movement.direction * diaboloSpeed) < 0.1f) {
 
-						// If another movement is due, stop this one right away
-						if (queuedMovementCount && TIM2->CNT > queuedMovements[0].startTime){
-							movement.running = 0;
-							movement.endTimestamp = TIM2->CNT;
-						}
-
-						// Otherwise move to the 'stopping' step, where it waits for half a second until it stabilizes
-						else {
-							movement.step = STOPPING;
-							PID_WeightAngleWithMotorSpeed.target = 0;
-							movement.stoppingTimestamp = TIM2->CNT;
-						}
-					}
-
-					if (movement.step == STOPPING && TIM2->CNT - movement.stoppingTimestamp >= 500000) {
+					if (runTime >= p.totalTime + 1.0f) {
 						movement.running = 0;
-						PID_WeightAngleWithMotorSpeed.on = 0;
-						movement.endTimestamp = TIM2->CNT;
+						movement.direction = -movement.direction;
 					}
 				}
 
@@ -549,8 +559,6 @@ int main(void) {
 						right = fix_joystick(buffer[3]);
 						backwards = fix_joystick(buffer[1]);
 
-
-
 						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
 						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
 	//
@@ -559,8 +567,6 @@ int main(void) {
 
 
 						PID_WeightAngleWithMotorSpeed.on = 1;
-						//					phaseVoltage = 5;
-						//					if (ABS(PID_AngleWithSpeed.target) > 45) phaseVoltage = 6;
 
 						// Reset speed if right shoulder button is pressed
 						if (buffer[6] & 0b01000000) motorSpeedTarget = 0;
@@ -576,13 +582,9 @@ int main(void) {
 
 
 
+			PID_BibiPositionWithBibiSpeed.target = positionTarget;
 
-
-
-
-
-
-
+			PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
 
 
 			static float speed_target = 0.0f;
@@ -674,10 +676,10 @@ int main(void) {
 			// Print debug data
 
 			myData.a = speed_target;
-			myData.b = acceleration;
-			myData.c = accelerationFiltered;
-			myData.d = angle_ff;
-			myData.e = diaboloSpeed;
+			myData.b = diaboloSpeed;
+			myData.c = positionTarget;
+			myData.d = diaboloPosition;
+			myData.e = 0;
 			myData.f = 0;
 
 			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
