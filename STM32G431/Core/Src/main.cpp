@@ -706,7 +706,7 @@ int main(void) {
 			myData.d = 0;
 			myData.e = 0;
 
-			sendFloats(&myData);
+			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
 
 
 

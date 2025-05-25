@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define BIBIS 7
+#define BIBIS 8
 
 static const uint32_t known_uids[BIBIS][3] = {
     {0x21002b, 0x5130500d, 0x2035344b},
@@ -14,7 +14,8 @@ static const uint32_t known_uids[BIBIS][3] = {
     {0x1e002e, 0x5130500d, 0x2035344b},
     {0x1f0049, 0x5130500d, 0x2035344b},
     {0x310039, 0x5130500c, 0x2035344b},
-    {0x33003e, 0x5130500c, 0x2035344b}
+    {0x33003e, 0x5130500c, 0x2035344b},
+    {0x340059, 0x5130500c, 0x2035344b}
 };
 
 static inline uint8_t BIBI_GetID(void) {
