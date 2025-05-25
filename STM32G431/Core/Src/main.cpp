@@ -57,15 +57,20 @@ BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
 
 
 
-volatile float motorSpeed;
-float electricalAngleTarget, electricalAngle;
+float motorSpeedTarget;
 float motorAngleFullDeg;
+
+float electricalAngleTarget;
+float electricalAngle;
+
 float diaboloAngleFullDeg;
 float diaboloPosition;
-float lastDiaboloPosition;
-volatile float diaboloSpeed;
-float lastDiaboloSpeed;
+float diaboloSpeed;
 float diaboloAcceleration;
+
+float lastDiaboloSpeed;
+float lastDiaboloPosition;
+
 
 float SPEED_ALPHA = 0.01f;
 float ACCEL_ALPHA = 0.005f;
@@ -113,6 +118,20 @@ volatile PIDController PID_MotorPositionWithVoltage = {
 		.d = 0.5f,
 		.alpha = 0.01f,
 		.limit = 6.5f,
+		.target = 0.0f,
+		.reset_threshold = 10000.0f,
+
+		.on = 1
+};
+
+
+
+volatile PIDController PID_BibiSpeedWithWeightAngle = {
+		.p = 100.0f,
+		.i = 0.0f,
+		.d = 0.0f,
+		.alpha = 0.01f,
+		.limit = 120.0f,
 		.target = 0.0f,
 		.reset_threshold = 10000.0f,
 
@@ -184,6 +203,10 @@ int8_t right;
 int8_t backwards;
 
 
+// -- Constants --
+float dt = 0.0001f;          // Loop interval (100 µs)
+float alpha = 0.0004f;         // Filter smoothing factor (tweak as needed)
+float K_ff = -80.0f;           // Feedforward gain (start small)
 
 
 // Main loop
@@ -519,26 +542,29 @@ int main(void) {
 					NRF_GetData(buffer);
 					NRF_ReceiveTimestamp = TIM2->CNT;
 
-					right = fix_joystick(buffer[3]);
-					backwards = fix_joystick(buffer[1]);
+					// If the checksum is correct
+					if (buffer[9] == symaChecksum(&buffer[0])){
+
+						right = fix_joystick(buffer[3]);
+						backwards = fix_joystick(buffer[1]);
 
 
 
-					if (BIBI_Number == 6) PID_WeightAngleWithMotorSpeed.target = (-backwards * 0.8f - right * 0.4f) * 60.0f / 127.0f;
-					if (BIBI_Number == 7) PID_WeightAngleWithMotorSpeed.target = (backwards * 0.8f - right * 0.4f) * 60.0f / 127.0f;
+						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
+						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
+	//
+						if (BIBI_Number == 8) PID_BibiSpeedWithWeightAngle.target = right / 100.0f;
 
-					if (BIBI_Number == 8) PID_WeightAngleWithMotorSpeed.target = right * 120.0f / 127.0f;
 
+						PID_WeightAngleWithMotorSpeed.on = 1;
+						//					phaseVoltage = 5;
+						//					if (ABS(PID_AngleWithSpeed.target) > 45) phaseVoltage = 6;
 
-					PID_WeightAngleWithMotorSpeed.on = 1;
-					//					phaseVoltage = 5;
-					//					if (ABS(PID_AngleWithSpeed.target) > 45) phaseVoltage = 6;
-
-					// Reset speed if right shoulder button is pressed
-					if (buffer[6] & 0b01000000) motorSpeed = 0;
+						// Reset speed if right shoulder button is pressed
+						if (buffer[6] & 0b01000000) motorSpeedTarget = 0;
+					}
 				}
 			}
-
 
 
 
@@ -548,20 +574,40 @@ int main(void) {
 
 
 
+			// -- State --
+			static float speed_target = 0.0f;
+			static float last_speed_target = 0.0f;
+			static float d_speed_filtered = 0.0f;
+
+			speed_target = PID_BibiSpeedWithWeightAngle.target;
+
+			float d_speed_raw = (speed_target - last_speed_target) / dt;
+			last_speed_target = speed_target;
+
+			// 3. Apply low-pass filter to derivative
+			d_speed_filtered = (1.0f - alpha) * d_speed_filtered + alpha * d_speed_raw;
+
+			// Add filtered derivative-based feedforward to help drive acceleration
+			float angle_ff = K_ff * d_speed_filtered;  // from previous steps
 
 
-			//Its not diabolospeed. It's motor speed translated to diabolospeed. Not correct. Fix!'
+
+
+
+			PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angle_ff + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
+
+
 
 			if (PID_WeightAngleWithMotorSpeed.on){
-				motorSpeed += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
+				motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
 
-				motorSpeed = LIMIT(-PID_WeightAngleWithMotorSpeed.limit, motorSpeed, PID_WeightAngleWithMotorSpeed.limit);
+				motorSpeedTarget = LIMIT(-PID_WeightAngleWithMotorSpeed.limit, motorSpeedTarget, PID_WeightAngleWithMotorSpeed.limit);
 
 				// Speed should be in meters per second
-				electricalAngleTarget += motorSpeed * POLE_PAIRS / (float)SAMPLE_FREQUENCY;
+				electricalAngleTarget += motorSpeedTarget * POLE_PAIRS / (float)SAMPLE_FREQUENCY;
 			}
 			else {
-				motorSpeed = 0;
+				motorSpeedTarget = 0;
 			}
 
 
@@ -611,11 +657,11 @@ int main(void) {
 
 			// Print debug data
 
-			myData.a = ENC_LastFullAngleRad;
-			myData.b = angleTimer / 65535.0f * 4.0f * TWO_PI;
-			myData.c = 0;
-			myData.d = 0;
-			myData.e = 0;
+			myData.a = speed_target;
+			myData.b = d_speed_raw;
+			myData.c = d_speed_filtered;
+			myData.d = angle_ff;
+			myData.e = diaboloSpeed;
 			myData.f = 0;
 
 			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
