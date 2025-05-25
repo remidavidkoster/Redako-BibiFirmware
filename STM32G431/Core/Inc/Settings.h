@@ -73,6 +73,12 @@ void CUE_Start(uint8_t BIBI_NUMBER, uint32_t cue) {
 			if (cue == 3) queueMovement((struct MovementStep){LEFT, 0.5, 20, 0.5, 20}, 50);
 			if (cue == 4);
 		}
+		if (BIBI_NUMBER == 8) {
+			if (cue == 1);
+			if (cue == 2) queueMovement((struct MovementStep){RIGHT, 0.5, 45, 0.5, 45}, 8);
+			if (cue == 3) queueMovement((struct MovementStep){LEFT, 0.5, 20, 0.5, 20}, 50);
+			if (cue == 4);
+		}
 	}
 }
 

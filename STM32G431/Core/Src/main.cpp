@@ -20,6 +20,7 @@
 #include "UID.h"
 #include "Radio.h"
 #include "encoder.h"
+#include "quintic.h"
 
 void SystemClock_Config(void);
 
@@ -571,6 +572,15 @@ int main(void) {
 
 
 			ENC_Update();
+
+
+
+
+
+
+
+
+
 
 
 
