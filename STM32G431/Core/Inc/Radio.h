@@ -37,7 +37,7 @@ uint8_t buffer[SYMAPAYLOADSIZE];
 // Debug send command
 uint8_t send;
 
-void configNRFTCMfx() {
+void NRF_ConfigTCMfx() {
 	// NRF24L01P init
 	NRF_Init();
 	setRADDR((uint8_t *)"TCMfx");

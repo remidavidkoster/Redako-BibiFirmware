@@ -16,11 +16,11 @@
 
 
 
-#define POLE_PAIRS 7
+#define POLE_PAIRS (7.0f)
 #define _1_DIV_POLE_PAIRS 0.14285714285714285714f
 
 
-#define DIABOLO_CIRCUMFERENCE 0.408
+#define DIABOLO_CIRCUMFERENCE 0.408f
 #define METERS2RAD (TWO_PI / DIABOLO_CIRCUMFERENCE)
 #define RAD2METERS (DIABOLO_CIRCUMFERENCE / TWO_PI)
 
@@ -157,9 +157,23 @@ float computeAcceleration(double angle) {
 
 
 
+void MOT_Init(){
+
+	// Initialize sine lookup table
+	initSinTable();
+
+	// Motor PWM start
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+}
+
+void MOT_Enable(){
+	// Enable motor stuff
+	HAL_GPIO_WritePin(MOT_ENABLE_GPIO_Port, MOT_ENABLE_Pin, (GPIO_PinState)1);
 
 
-
+}
 
 
 

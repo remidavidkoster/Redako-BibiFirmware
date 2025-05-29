@@ -59,18 +59,19 @@ BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
 
 
 float motorSpeedTarget;
-float motorAngleFullDeg;
+double motorAngleFullDeg;
 
-float electricalAngleTarget;
-float electricalAngle;
+double electricalAngleTarget;
+double electricalAngle;
 
-float diaboloAngleFullDeg;
-float diaboloPosition;
+double diaboloAngleFullDeg;
+double diaboloPosition;
+double lastDiaboloPosition;
+
 float diaboloSpeed;
+float lastDiaboloSpeed;
 float diaboloAcceleration;
 
-float lastDiaboloSpeed;
-float lastDiaboloPosition;
 
 
 float SPEED_ALPHA = 0.01f;
@@ -95,8 +96,8 @@ typedef struct {
 
 	float limit;
 
-	float target;
-	float lastTarget;
+	double target;
+	double lastTarget;
 	float reset_threshold;
 
 	float on;
@@ -130,8 +131,8 @@ volatile PIDController PID_MotorPositionWithVoltage = {
 
 
 volatile PIDController PID_BibiSpeedWithWeightAngle = {
-		.p = 100.0f,
-		.i = 40.0f,
+		.p = 60.0f,//100.0f,
+		.i = 0.0f,//40.0f,
 		.d = 0.0f,
 		.alpha = 0.01f,
 		.limit = 120.0f,
@@ -178,7 +179,7 @@ float accelerationTargetFiltered;
 
 
 
-float runPID(volatile PIDController *pid, float currentValue) {
+float runPID(volatile PIDController *pid, double currentValue) {
 	const float dt = 1.0f / SAMPLE_FREQUENCY; // 0.0001 seconds
 
 	pid->error = currentValue - pid->target;
@@ -198,7 +199,7 @@ float runPID(volatile PIDController *pid, float currentValue) {
 	// Derivative with low-pass filter
 	pid->derivative = pid->alpha * pid->d * (pid->error - pid->prev_error) / dt + (1.0f - pid->alpha) * pid->derivative;
 
-	// PID output (currently PD only)
+	// PID output
 	pid->output = pid->p * pid->error + pid->integral + pid->derivative;
 
 	// Clamp output
@@ -233,20 +234,20 @@ int8_t backwards;
 
 
 // -- Constants --
-float accelerationTargetAlpha = 0.0004f;         // Filter smoothing factor (tweak as needed)
-float K_ff = -80.0f;           // Feedforward gain (start small)
+float accelerationTargetAlpha = 0.0004f;         // Filter smoothing factor
+float accelerationFeedForwardGain = 0;//-80.0f;           // Feedforward gain
 
 
 // Main loop
 int main(void) {
 
-	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	// Reset of all peripherals, Initializes the Flash interface and the Systick.
 	HAL_Init();
 
-	/* Configure the system clock */
+	// Configure the system clock
 	SystemClock_Config();
 
-	/* Initialize all configured peripherals */
+	// Initialize all configured peripherals
 	MX_GPIO_Init();
 	MX_DMA_Init();
 	MX_TIM1_Init();
@@ -262,18 +263,15 @@ int main(void) {
 	MX_TIM8_Init();
 
 
-
 	// Start microsecond timer, overflows after 71 minutes.
 	HAL_TIM_Base_Start(&htim2);
 
 
+	// Initialize ADC stuff
 	ADC_Init();
 
-
-	// RGB Led PWM Channels
-	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+	// Initialize RGB Led stuff
+	RGB_Init();
 
 
 
@@ -291,6 +289,8 @@ int main(void) {
 		CHG_RunLogic();
 	}
 
+
+
 	// If second button is pressed during startup, this will be remote controlled
 	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
 		BIBI_Mode = REMOTE_CONTROLLED;
@@ -306,49 +306,44 @@ int main(void) {
 	// Get Bibi ID
 	BIBI_Number = BIBI_GetID();
 
-
-	//ICM42670 Init, etup rate & scale
-	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hspi1);
-	icm42670_mclk_on(&imu);
-	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
-	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+	// Force remote controlled for steering Bibi halves now
+	if (BIBI_Number == 6) BIBI_Mode = REMOTE_CONTROLLED;
+	if (BIBI_Number == 7) BIBI_Mode = REMOTE_CONTROLLED;
 
 
 
+	// Initialize IMU
+	IMU_Init();
+
+
+
+	// Config radio
 	if (BIBI_Mode == REMOTE_CONTROLLED) {
-		configNRFSyma();
-		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
-	} else {
-		configNRFTCMfx();
+		NRF_ConfigSyma();
 
-		//		PID_AngleWithSpeed.on = 1;
-		//		phaseVoltage = 2;
-		PID_WeightAngleWithMotorSpeed.target = 0;
+		// Wait for mode setting button to be depressed
+		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
+	}
+
+	else if (BIBI_Mode == CUE_CONTROLLED){
+		NRF_ConfigTCMfx();
 	}
 
 
 
-	HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
-
+	// Setup magnetic encoder
 	ENC_Setup();
 
 
 
-	// Enable motor stuff
-	HAL_GPIO_WritePin(MOT_ENABLE_GPIO_Port, MOT_ENABLE_Pin, (GPIO_PinState)1);
-
-	// Motor PWM Enable
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-
-	// Initialize sine lookup table
-	initSinTable();
+	// Initialize and enable motor driver
+	MOT_Init();
+	MOT_Enable();
 
 
 
 	// Wait until stable, get gyro offsets
-	waitForStableGetGyroOffsets();
+	IMU_WaitForStableGetGyroOffsets();
 
 	// Turn motor on
 	MOT_SetPhaseVoltage(5.65f, _3PI_2);
@@ -370,7 +365,7 @@ int main(void) {
 	electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS;
 
 
-
+	// Movement defaults for debugging
 	p.totalDistance = 1;
 	p.rampRatio = 1;
 	p.maxSpeed = 0.5f;
@@ -403,19 +398,16 @@ int main(void) {
 			CHG_RunLogic();
 
 			// Low battery shut down
-			if (TIM2->CNT > 1000000){
-				BAT_CheckLowShutdown();
-			}
+			BAT_CheckLowShutdown();
 
-			// Button shut down
-			if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+			// Check button shutdown
+			SYS_ButShutdown();
 
 			// Get IMU data and update Madgwick filter
 			MAD_Update();
 
-
-
-
+			// Check if the led button is pressed
+			RGB_CheckFadexButton();
 
 
 
@@ -540,8 +532,11 @@ int main(void) {
 						right = fix_joystick(buffer[3]);
 						backwards = fix_joystick(buffer[1]);
 
-						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
-						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + (backwards > 0 ? -right : right) * 0.3f) / 100.0f;
+						// Steering Bibi
+						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + right * (20 + buffer[0]) / 400.0f) / 50.0f;
+						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + right * (20 + buffer[0]) / 400.0f) / 50.0f;
+
+						// First Bibi V1.1
 						if (BIBI_Number == 8) PID_BibiSpeedWithWeightAngle.target = right / 100.0f;
 						// if (BIBI_Number == 8) PID_WeightAngleWithMotorSpeed.target = right * 120.0f / 127.0f;
 
@@ -574,7 +569,7 @@ int main(void) {
 
 
 			// Add filtered derivative-based feedforward to angle to help drive acceleration
-			float angleFeedForward = K_ff * accelerationTargetFiltered;
+			float angleFeedForward = accelerationFeedForwardGain * accelerationTargetFiltered;
 
 			// Steady state conversion formula didn't seem to help a lot
 			// float angleFeedForward = K_ff * computeAngle(accelerationTargetFiltered);
@@ -647,10 +642,10 @@ int main(void) {
 
 
 			// Print debug data
-			myData.a = speedTarget;
-			myData.b = diaboloSpeed;
-			myData.c = positionTarget;
-			myData.d = diaboloPosition;
+			myData.a = imu_data.gyroZerod.z;
+			myData.b = PID_MotorPositionWithVoltage.error;
+			myData.c = PID_MotorPositionWithVoltage.derivative;
+			myData.d = ENC_LastFullAngleRad;
 			myData.e = 0;
 			myData.f = 0;
 

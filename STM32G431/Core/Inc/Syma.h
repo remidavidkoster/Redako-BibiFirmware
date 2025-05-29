@@ -19,7 +19,7 @@ const uint8_t chans_bind[] = {0x4b, 0x30, 0x40, 0x09}; // bind chan
 const uint8_t chans_fixedSmall[] = {0x12, 0x22, 0x32, 0x42}; // bind chan
 
 // Configure the NRF for listening to the Syma remote
-void configNRFSyma() {
+void NRF_ConfigSyma() {
 
 	// Configure 16 bit checksum
 	mirf_CONFIG = ((1 << EN_CRC) | (1 << CRCO));

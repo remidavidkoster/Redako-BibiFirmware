@@ -33,13 +33,14 @@ void RGB_Set(float r, float g, float b){
 
 
 
+uint8_t RGB_On = 1;
+uint8_t RGB_Fading = 1;
+float RGB_Brightness = 1;
+float RGB_FadeStep = 0.0001f;
+
+
 void BAT_VoltageToRGB(float voltage) {
 	float r = 0.0f, g = 0.0f, b = 0.0f;
-
-	if (voltage == 0) {
-		RGB_Set(0, 0, 0);
-		return;
-	}
 
 	// Clamp voltage between min and max
 	if (voltage < VBAT_MIN_VOLTAGE) voltage = VBAT_MIN_VOLTAGE;
@@ -59,10 +60,27 @@ void BAT_VoltageToRGB(float voltage) {
 		b = t;
 	}
 
-	RGB_Set(r, g, b);
+	RGB_Set(r * RGB_Brightness * RGB_Brightness, g * RGB_Brightness * RGB_Brightness, b * RGB_Brightness * RGB_Brightness);
 }
 
+void SYS_ButShutdown(){
 
+	// Button shut down
+	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
+		RGB_Set(1, 0, 0);
+		HAL_Delay(100);
+		RGB_Set(0, 0, 0);
+		HAL_Delay(100);
+		RGB_Set(1, 0, 0);
+		HAL_Delay(100);
+		RGB_Set(0, 0, 0);
+		HAL_Delay(100);
+		RGB_Set(1, 0, 0);
+		HAL_Delay(100);
+		RGB_Set(0, 0, 0);
+		HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+	}
+}
 
 
 
@@ -77,7 +95,49 @@ struct ADC {
 } ADC;
 
 
+void RGB_Init(){
+	// RGB Led PWM Channels
+	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+}
 
+
+
+void RGB_CheckFadexButton(){
+	// RGB LED Toggle button
+	if (!RGB_Fading && HAL_GPIO_ReadPin(BUT1_GPIO_Port, BUT1_Pin)){
+
+		// Toggle RGB LED
+		RGB_On = !RGB_On;
+
+		// Start fade
+		RGB_Fading = 1;
+	}
+
+	if (RGB_Fading){
+
+		// When fading in
+		if (RGB_On){
+			RGB_Brightness += RGB_FadeStep;
+
+			if (RGB_Brightness >= 1){
+				RGB_Brightness = 1;
+				RGB_Fading = 0;
+			}
+		}
+
+		// When fading in
+		if (!RGB_On){
+			RGB_Brightness -= RGB_FadeStep;
+
+			if (RGB_Brightness <= 0){
+				RGB_Brightness = 0;
+				RGB_Fading = 0;
+			}
+		}
+	}
+}
 
 
 void ADC_Init(){

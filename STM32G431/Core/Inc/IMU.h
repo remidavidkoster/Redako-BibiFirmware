@@ -89,7 +89,7 @@ float accel_y_stddev;
 float accel_z_stddev;
 
 
-void waitForStableGetGyroOffsets(){
+void IMU_WaitForStableGetGyroOffsets(){
 	// Initialize rolling buffers for accelerometer and gyro data
 	float accel_x_buffer[NUM_SAMPLES] = {0};
 	float accel_y_buffer[NUM_SAMPLES] = {0};
@@ -199,6 +199,17 @@ void MAD_Update(){
 }
 
 
+
+
+void IMU_Init(){
+
+	//ICM42670 Init, etup rate & scale
+	icm42670_init(&imu, ICM42670_DEFAULT_ADDRESS, &hspi1);
+	icm42670_mclk_on(&imu);
+	icm42670_start_accel(&imu, ICM42670_ACCEL_FS_2G, ICM42670_ODR_1600_HZ);
+	icm42670_start_gyro(&imu, ICM42670_GYRO_FS_2000_DPS, ICM42670_ODR_1600_HZ);
+
+}
 
 
 

@@ -14,18 +14,17 @@ uint8_t rxData[6];
 uint32_t lastRawAngle = 0;
 
 
-float velocity=0.0f;
-float ENC_LastAngleRad=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
-float ENC_LastFullAngleRad=0.0f; // result of last call to getSensorAngle(), used for full rotations and velocity
+float ENC_LastAngleRad;
+double ENC_LastFullAngleRad;
+
+
+
+
 float angleTimer;
 
 float MOT_ZeroElectricAngle;
 
-uint32_t angle_prev_ts=0; // timestamp of last call to getAngle, used for velocity
-float vel_angle_prev=0.0f; // angle at last call to getVelocity, used for velocity
-uint32_t vel_angle_prev_ts=0; // last velocity calculation timestamp
 int32_t ENC_FullRotations=0; // full rotation tracking
-int32_t vel_full_rotations=0; // previous full rotation value for velocity calculation
 
 const int32_t sensor_direction = 1;
 
@@ -56,12 +55,16 @@ void ENC_Update(){
 	if(abs(d_angle) > (0.8f*_2PI) ) ENC_FullRotations += ( d_angle > 0 ) ? -1 : 1;
 	ENC_LastAngleRad = val;
 
-	ENC_LastFullAngleRad = (float)ENC_FullRotations * _2PI + ENC_LastAngleRad;
+	ENC_LastFullAngleRad = (double)ENC_FullRotations * _2PI + ENC_LastAngleRad;
 
 	angleTimer = TIM4->CNT;
 }
 
 void ENC_Setup(){
+
+	// Start encoder timer
+	HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
+
 	// Set ABZ resolution to highest setting (4096 ppr / 16384 spr)
 	txData[0] = 0b0110 << 4;
 	txData[1] = 0x07;
@@ -78,8 +81,6 @@ void ENC_Setup(){
 	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
 	HAL_SPI_TransmitReceive(&hspi3, txData, rxData, 3, HAL_MAX_DELAY);
 	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)1);
-
-
 }
 
 
