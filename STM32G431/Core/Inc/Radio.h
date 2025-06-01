@@ -56,11 +56,15 @@ typedef struct {
     int16_t newPosition;
     uint8_t maxSpeed;
     uint8_t acceleration;
+    uint16_t startDelay;
 } MotionCommand;
 #pragma pack(pop)
 
 
-
+enum {
+	COMMAND_MOVE = 10,
+	COMMAND_SHUTDOWN = 20
+};
 
 
 void NRF_ConfigMotionControlled() {

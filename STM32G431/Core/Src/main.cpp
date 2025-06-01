@@ -29,7 +29,7 @@ typedef enum {
 	MOTION_CONTROLLED
 } BIBI_Mode_t;
 
-BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
+BIBI_Mode_t BIBI_Mode = MOTION_CONTROLLED;
 
 
 
@@ -220,6 +220,19 @@ float accelerationTargetAlpha = 0.0004f;         // Filter smoothing factor
 float accelerationFeedForwardGain = -80.0f;           // Feedforward gain
 
 
+MotionCommand debugCMD = {
+		.command = COMMAND_MOVE,
+		.bibiNumber = 0,
+		.newPosition = 50,
+		.maxSpeed = 10,
+		.acceleration = 10,
+		.startDelay = 0
+};
+
+uint8_t sendMessage;
+
+
+
 // Main loop
 int main(void) {
 
@@ -366,7 +379,7 @@ int main(void) {
 
 
 			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
-			static int moved = 0;
+			static int moved = 1;
 			if (!moved && TIM2->CNT > 15000000){
 				moved = 1;
 				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
@@ -436,7 +449,8 @@ int main(void) {
 				speedTarget = (positionTarget - lastPositionTarget) * SAMPLE_FREQUENCY;
 				lastPositionTarget = positionTarget;
 
-				// If we've passed the runtime, stop 'movement' (the PIDs still try to hold the current position). End a biiiit early if there's another movement queued.
+				// If we've passed the runtime, stop 'movement' (the PIDs still try to hold the current position). End when stopped if there's another movement queued.
+				//				if (runTime >= p.totalTime || (runTime > 1.0f && queuedMovementCount && (movement.direction == 1 ? diaboloSpeed > 0 : diaboloSpeed < 0))) {
 				if (runTime >= p.totalTime - (queuedMovementCount ? 0.25f : 0)) {
 					movement.running = 0;
 				}
@@ -449,15 +463,39 @@ int main(void) {
 				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 				NRF_ReceiveTimestamp = TIM2->CNT;
 
-				// Start cues if we have to
-				if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
-					if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
-					if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
-					if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
-					if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
 
-					// Shut down Bibi if all buttons are pressed at once
-					if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+				if (BIBI_Mode == CUE_CONTROLLED){
+
+					// Start cues if we have to
+					if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
+						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
+						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
+						if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
+						if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
+
+						// Shut down Bibi if all buttons are pressed at once
+						if (buffer[3] == 15) SYS_Shutdown();
+					}
+				}
+
+				// If we're listening to wireless motion commands
+				if (BIBI_Mode == MOTION_CONTROLLED){
+
+					// Copy the buffer to the command data structure
+					MotionCommand cmd;
+					memcpy(&cmd, buffer, sizeof(MotionCommand));
+
+					// If we have to move
+					if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0) && cmd.command == COMMAND_MOVE){
+
+						// Queue the sent movement
+						queueMovement((struct MovementStep){cmd.newPosition / 100.0f, cmd.maxSpeed / 100.0f, cmd.acceleration / 100.0f}, cmd.startDelay);
+					}
+
+					// Shut down if we get a shutdown command
+					if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0) && cmd.command == COMMAND_SHUTDOWN){
+						SYS_Shutdown();
+					}
 				}
 			}
 
@@ -465,6 +503,28 @@ int main(void) {
 			if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
 				lastCueStarted = 0;
 			}
+
+
+
+
+
+
+
+			// Debug send command
+			if (sendMessage == 1 || !HAL_GPIO_ReadPin(BUT3_GPIO_Port, BUT3_Pin)) {
+				sendMessage = 0;
+
+
+
+				memcpy(buffer, &debugCMD, sizeof(debugCMD));
+				NRF_Send(buffer);
+				while (NRF_IsSending());
+
+				while (!HAL_GPIO_ReadPin(BUT3_GPIO_Port, BUT3_Pin));
+			}
+
+
+
 
 
 
