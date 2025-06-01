@@ -533,8 +533,8 @@ int main(void) {
 						backwards = fix_joystick(buffer[1]);
 
 						// Steering Bibi
-						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + right * (20 + buffer[0]) / 400.0f) / 50.0f;
-						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + right * (20 + buffer[0]) / 400.0f) / 50.0f;
+						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + right * (20 + buffer[0]) / 400.0f) / 100.0f;
+						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + right * (20 + buffer[0]) / 400.0f) / 100.0f;
 
 						// First Bibi V1.1
 						if (BIBI_Number == 8) PID_BibiSpeedWithWeightAngle.target = right / 100.0f;

@@ -44,7 +44,7 @@ void NRF_ConfigTCMfx() {
 	setTADDR((uint8_t *)"TCMfx");
 	payload = TCMPAYLOADSIZE;
 	channel = 101;
-	NRF_Config(RF_DR_2MBPS | RF_PWR_NEG12DBM);
+	NRF_Config(RF_DR_2MBPS | RF_PWR_0DBM);
 }
 
 
