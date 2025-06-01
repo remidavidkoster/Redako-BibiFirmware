@@ -24,12 +24,12 @@ void RGB_Set(float r, float g, float b){
 }
 
 // Voltage thresholds for color transitions
-#define VBAT_MIN_VOLTAGE   3.4f  // Red
-#define VBAT_MID_VOLTAGE   3.75f  // Green
+#define VBAT_MIN_VOLTAGE   3.2f  // Red
+#define VBAT_MID_VOLTAGE   3.8f  // Green
 #define VBAT_MAX_VOLTAGE   4.2f  // Blue
 
 
-#define BAT_SHUTDOWN_VOLTAGE 3.4f
+#define BAT_SHUTDOWN_VOLTAGE 3.0f
 
 
 
