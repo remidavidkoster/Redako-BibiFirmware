@@ -37,7 +37,7 @@ uint8_t buffer[SYMAPAYLOADSIZE];
 // Debug send command
 uint8_t send;
 
-void NRF_ConfigTCMfx() {
+void NRF_ConfigCueButtonControlled() {
 	// NRF24L01P init
 	NRF_Init();
 	setRADDR((uint8_t *)"TCMfx");
@@ -46,6 +46,44 @@ void NRF_ConfigTCMfx() {
 	channel = 101;
 	NRF_Config(RF_DR_2MBPS | RF_PWR_0DBM);
 }
+
+
+
+#pragma pack(push, 1)
+typedef struct {
+	uint8_t command;
+    uint8_t bibiNumber;
+    int16_t newPosition;
+    uint8_t maxSpeed;
+    uint8_t acceleration;
+} MotionCommand;
+#pragma pack(pop)
+
+
+
+
+
+void NRF_ConfigMotionControlled() {
+	// NRF24L01P init
+	NRF_Init();
+	setRADDR((uint8_t *)"TCMfx");
+	setTADDR((uint8_t *)"TCMfx");
+	payload = sizeof(MotionCommand);
+	channel = 101;
+	NRF_Config(RF_DR_2MBPS | RF_PWR_0DBM);
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

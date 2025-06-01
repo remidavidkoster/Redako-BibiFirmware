@@ -6,7 +6,7 @@
 
 
 // StartMovement:
-//   direction [LEFT, RIGHT]
+//   direction [RIGHT]
 //   acceleration distance [m]
 //   acceleration angle [0°-60°]
 //   coast distance [m]
@@ -38,45 +38,45 @@ void CUE_Start(uint8_t BIBI_NUMBER, uint32_t cue) {
 		lastCueStarted = cue;
 		if (BIBI_NUMBER == 1) {
 			if (cue == 1) {
-				queueMovement((struct MovementStep){LEFT, 3.0, 25, 0.6, 25}, 30);
-				queueMovement((struct MovementStep){RIGHT, 1.5, 60, 0.5, 60}, 30);
-				queueMovement((struct MovementStep){LEFT, 1.5, 60, 0.5, 60}, 30);
-				queueMovement((struct MovementStep){RIGHT, 0.2, 50, 0.1, 50}, 30);
-				queueMovement((struct MovementStep){LEFT, 0.2, 50, 0.2, 50}, 30);
+				queueMovement((struct MovementStep){3.0, 25, 0.6}, 30);
+				queueMovement((struct MovementStep){1.5, 60, 0.5}, 30);
+				queueMovement((struct MovementStep){1.5, 60, 0.5}, 30);
+				queueMovement((struct MovementStep){0.2, 50, 0.1}, 30);
+				queueMovement((struct MovementStep){0.2, 50, 0.2}, 30);
 
 			}
 			if (cue == 2);
 			if (cue == 3);
-			if (cue == 4) startMovement((struct MovementStep){RIGHT, 5, 60, 5, 45});
+			if (cue == 4) startMovement((struct MovementStep){5, 60, 5});
 		}
 		if (BIBI_NUMBER == 2) {
 			if (cue == 1);
-			if (cue == 2) startMovement((struct MovementStep){RIGHT, 0.4, 45, 0.6, 45});
-			if (cue == 3) queueMovement((struct MovementStep){LEFT, 0.4, 20, 0.6, 20}, 0);
+			if (cue == 2) startMovement((struct MovementStep){0.4, 45, 0.6});
+			if (cue == 3) queueMovement((struct MovementStep){0.4, 20, 0.6}, 0);
 			if (cue == 4);
 		}
 		if (BIBI_NUMBER == 3) {
 			if (cue == 1);
-			if (cue == 2) queueMovement((struct MovementStep){LEFT, 0.4, 45, 0.6, 45}, 1);
-			if (cue == 3) queueMovement((struct MovementStep){RIGHT, 0.4, 20, 0.6, 45}, 40);
+			if (cue == 2) queueMovement((struct MovementStep){0.4, 45, 0.6}, 1);
+			if (cue == 3) queueMovement((struct MovementStep){0.4, 20, 0.6}, 40);
 			if (cue == 4);
 		}
 		if (BIBI_NUMBER == 4) {
 			if (cue == 1);
-			if (cue == 2) queueMovement((struct MovementStep){RIGHT, 0.5, 45, 0.5, 45}, 8);
-			if (cue == 3) queueMovement((struct MovementStep){LEFT, 0.5, 20, 0.5, 20}, 50);
+			if (cue == 2) queueMovement((struct MovementStep){0.5, 45, 0.5}, 8);
+			if (cue == 3) queueMovement((struct MovementStep){0.5, 20, 0.5}, 50);
 			if (cue == 4);
 		}
 		if (BIBI_NUMBER == 5) {
 			if (cue == 1);
-			if (cue == 2) queueMovement((struct MovementStep){RIGHT, 0.5, 45, 0.5, 45}, 8);
-			if (cue == 3) queueMovement((struct MovementStep){LEFT, 0.5, 20, 0.5, 20}, 50);
+			if (cue == 2) queueMovement((struct MovementStep){0.5, 45, 0.5}, 8);
+			if (cue == 3) queueMovement((struct MovementStep){0.5, 20, 0.5}, 50);
 			if (cue == 4);
 		}
 		if (BIBI_NUMBER == 8) {
 			if (cue == 1);
-			if (cue == 2) queueMovement((struct MovementStep){RIGHT, 0.5, 45, 0.5, 45}, 8);
-			if (cue == 3) queueMovement((struct MovementStep){LEFT, 0.5, 20, 0.5, 20}, 50);
+			if (cue == 2) queueMovement((struct MovementStep){0.5, 45, 0.5}, 8);
+			if (cue == 3) queueMovement((struct MovementStep){0.5, 20, 0.5}, 50);
 			if (cue == 4);
 		}
 	}

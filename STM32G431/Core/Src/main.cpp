@@ -23,31 +23,13 @@
 #include "quintic.h"
 
 void SystemClock_Config(void);
-
-
-
-
-
-
-
-
-
 typedef enum {
 	CUE_CONTROLLED,
-	REMOTE_CONTROLLED
+	REMOTE_CONTROLLED,
+	MOTION_CONTROLLED
 } BIBI_Mode_t;
 
 BIBI_Mode_t BIBI_Mode = CUE_CONTROLLED;
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -113,7 +95,7 @@ volatile PIDController PID_WeightAngleWithMotorSpeed = {
 		.target = 0.0f,
 		.reset_threshold = 5.0f,
 
-		.on = 1
+		.on = 0
 };
 
 volatile PIDController PID_MotorPositionWithVoltage = {
@@ -131,8 +113,8 @@ volatile PIDController PID_MotorPositionWithVoltage = {
 
 
 volatile PIDController PID_BibiSpeedWithWeightAngle = {
-		.p = 60.0f,//100.0f,
-		.i = 0.0f,//40.0f,
+		.p = 100.0f,
+		.i = 40.0f,
 		.d = 0.0f,
 		.alpha = 0.01f,
 		.limit = 120.0f,
@@ -235,7 +217,7 @@ int8_t backwards;
 
 // -- Constants --
 float accelerationTargetAlpha = 0.0004f;         // Filter smoothing factor
-float accelerationFeedForwardGain = 0;//-80.0f;           // Feedforward gain
+float accelerationFeedForwardGain = -80.0f;           // Feedforward gain
 
 
 // Main loop
@@ -291,56 +273,30 @@ int main(void) {
 
 
 
-	// If second button is pressed during startup, this will be remote controlled
-	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
-		BIBI_Mode = REMOTE_CONTROLLED;
+	// If third button is pressed during startup, this will be remote controlled
+	if (!HAL_GPIO_ReadPin(BUT3_GPIO_Port, BUT3_Pin)){
+		BIBI_Mode = MOTION_CONTROLLED;
 	}
 
 	// Keep itself on
 	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
 
-
-
-
-
 	// Get Bibi ID
 	BIBI_Number = BIBI_GetID();
-
-	// Force remote controlled for steering Bibi halves now
-	if (BIBI_Number == 6) BIBI_Mode = REMOTE_CONTROLLED;
-	if (BIBI_Number == 7) BIBI_Mode = REMOTE_CONTROLLED;
-
-
 
 	// Initialize IMU
 	IMU_Init();
 
-
-
 	// Config radio
-	if (BIBI_Mode == REMOTE_CONTROLLED) {
-		NRF_ConfigSyma();
-
-		// Wait for mode setting button to be depressed
-		while (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin));
-	}
-
-	else if (BIBI_Mode == CUE_CONTROLLED){
-		NRF_ConfigTCMfx();
-	}
-
-
+	if (BIBI_Mode == MOTION_CONTROLLED)	NRF_ConfigMotionControlled();
+	if (BIBI_Mode == CUE_CONTROLLED)	NRF_ConfigCueButtonControlled();
 
 	// Setup magnetic encoder
 	ENC_Setup();
 
-
-
 	// Initialize and enable motor driver
 	MOT_Init();
 	MOT_Enable();
-
-
 
 	// Wait until stable, get gyro offsets
 	IMU_WaitForStableGetGyroOffsets();
@@ -365,10 +321,7 @@ int main(void) {
 	electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS;
 
 
-	// Movement defaults for debugging
-	p.totalDistance = 1;
-	p.rampRatio = 1;
-	p.maxSpeed = 0.5f;
+
 
 
 
@@ -413,145 +366,107 @@ int main(void) {
 
 
 			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
-			static int moved = 1;
+			static int moved = 0;
 			if (!moved && TIM2->CNT > 15000000){
 				moved = 1;
-				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){LEFT,  1.0, 90, 0.1, 90}, 0);
-				queueMovement((struct MovementStep){RIGHT, 1.0, 90, 0.1, 90}, 0);
+				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
+				queueMovement((struct MovementStep){0.0, 1.0, 0.2}, 0);
+				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
+				queueMovement((struct MovementStep){0.0, 1.0, 0.2}, 0);
+				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
+				queueMovement((struct MovementStep){0.0, 1.0, 0.2}, 0);
 			}
 
 
 
 
 
-			if (BIBI_Mode == CUE_CONTROLLED){
 
-				// If we still have cued movements, and there's currently none running
-				if (queuedMovementCount && !movement.running){
 
-					// If it's time for the next one
-					if (TIM2->CNT > queuedMovements[0].startTime){
+			// If we still have queued movements, and there's currently none running
+			if (queuedMovementCount && !movement.running){
 
-						// Start next cued movement
-						startMovement(queuedMovements[0]);
+				// If it's time for the next one
+				if (TIM2->CNT > queuedMovements[0].startTime){
 
-						// Move cues down a row
-						memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
+					// Start next queued movement
+					startMovement(queuedMovements[0]);
 
-						// Zero out the last element
-						memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
+					// Move queued movements down a row
+					memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
 
-						// Decrement qued movement counter
-						queuedMovementCount--;
-					}
+					// Zero out the last element
+					memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
+
+					// Decrement queued movement counter
+					queuedMovementCount--;
 				}
+			}
+
+			// If we have to start a new movement
+			if (movement.start){
+				movement.start = 0;
+				movement.startTimestamp = TIM2->CNT;
+				movement.running = 1;
+
+				// Set current position as offset. Works because we're working in absolute units now.
+				movement.startOffset = diaboloPosition;
+
+				// Check what direction we're going
+				movement.direction = movement.newPosition > movement.startOffset ? 1 : -1;
+
+				// Movement planning
+				p.totalDistance = ABS(movement.newPosition - movement.startOffset);
+				p.rampRatio = movement.acceleration;
+				p.maxSpeed = movement.maxSpeed;
+
+				// Calculate the motion profile from the distance, acceleration, and max speed we've set.
+				distanceSpeedRampRatioToProfileTimes(p);
+
+				// Turn on the PID
+				PID_WeightAngleWithMotorSpeed.on = 1;
+			}
 
 
-				if (movement.start){
-					movement.start = 0;
-					movement.startTimestamp = TIM2->CNT;
-					movement.running = 1;
+			if (movement.running){
+				float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
 
-					// Set the last target as offset, so we won't slowly drift.
-					movement.startOffset = lastPositionTarget;
+				// Calculate position and speed targets
+				positionTarget = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed));
+				speedTarget = (positionTarget - lastPositionTarget) * SAMPLE_FREQUENCY;
+				lastPositionTarget = positionTarget;
 
-					// Calculate the motion times from the distance, acceleration, and speed we've set.
-					distanceSpeedRampRatioToProfileTimes(p);
-
-					// Turn on the PID
-					PID_WeightAngleWithMotorSpeed.on = 1;
-				}
-
-
-				if (movement.running){
-					float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
-
-					// Calculate position and speed targets
-					positionTarget = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed));
-					speedTarget = (positionTarget - lastPositionTarget) * SAMPLE_FREQUENCY;
-					lastPositionTarget = positionTarget;
-
-					// If we've passed the runtime, stop 'movement' (the PIDs still try to hold the current position)
-					if (runTime >= p.totalTime) {
-						movement.running = 0;
-						movement.direction = -movement.direction;
-					}
-				}
-
-				// Pass position target to position PID
-				PID_BibiPositionWithBibiSpeed.target = positionTarget;
-
-				// Pass calculated speed target + PID result to speed PID
-				PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
-
-
-
-
-				// Check radio
-				if (NRF_DataReady()) {
-					NRF_GetData(buffer);
-					NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
-					NRF_ReceiveTimestamp = TIM2->CNT;
-
-					// Start cues if we have to
-					if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
-						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
-						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
-						if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
-						if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
-
-						// Shut down Bibi if all buttons are pressed at once
-						if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
-					}
-				}
-
-				// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
-				if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
-					lastCueStarted = 0;
+				// If we've passed the runtime, stop 'movement' (the PIDs still try to hold the current position). End a biiiit early if there's another movement queued.
+				if (runTime >= p.totalTime - (queuedMovementCount ? 0.25f : 0)) {
+					movement.running = 0;
 				}
 			}
 
 
+			// Check radio
+			if (NRF_DataReady()) {
+				NRF_GetData(buffer);
+				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
+				NRF_ReceiveTimestamp = TIM2->CNT;
 
+				// Start cues if we have to
+				if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
+					if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
+					if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
+					if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
+					if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
 
-
-			else if (BIBI_Mode == REMOTE_CONTROLLED){
-
-				// If we got a new message
-				if (NRF_DataReady()) {
-					NRF_GetData(buffer);
-					NRF_ReceiveTimestamp = TIM2->CNT;
-
-					// If the checksum is correct
-					if (buffer[9] == symaChecksum(&buffer[0])){
-
-						right = fix_joystick(buffer[3]);
-						backwards = fix_joystick(buffer[1]);
-
-						// Steering Bibi
-						if (BIBI_Number == 6) PID_BibiSpeedWithWeightAngle.target = (-backwards + right * (20 + buffer[0]) / 400.0f) / 100.0f;
-						if (BIBI_Number == 7) PID_BibiSpeedWithWeightAngle.target = (backwards  + right * (20 + buffer[0]) / 400.0f) / 100.0f;
-
-						// First Bibi V1.1
-						if (BIBI_Number == 8) PID_BibiSpeedWithWeightAngle.target = right / 100.0f;
-						// if (BIBI_Number == 8) PID_WeightAngleWithMotorSpeed.target = right * 120.0f / 127.0f;
-
-
-						PID_WeightAngleWithMotorSpeed.on = 1;
-					}
-				}
-
-
-				// If we haven't had a message in a second, turn off the motor
-				if (TIM2->CNT - NRF_ReceiveTimestamp > 1000000){
-					PID_WeightAngleWithMotorSpeed.on = 0;
-					phaseVoltage = 0;
+					// Shut down Bibi if all buttons are pressed at once
+					if (buffer[3] == 15) HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 				}
 			}
+
+			// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
+			if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
+				lastCueStarted = 0;
+			}
+
+
 
 
 
@@ -575,43 +490,9 @@ int main(void) {
 			// float angleFeedForward = K_ff * computeAngle(accelerationTargetFiltered);
 
 
+
 			// Update encoder
 			ENC_Update();
-
-			// Set angle target based on acceleration feed forward and diabolo speed PID
-			PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
-
-			// Set motor speed target with angle PID
-			motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
-
-			// Limit motor speed (might not be necessary anymore with encoders)
-			motorSpeedTarget = LIMIT(-PID_WeightAngleWithMotorSpeed.limit, motorSpeedTarget, PID_WeightAngleWithMotorSpeed.limit);
-
-			// Set electrical angle target through desired motor speed
-			electricalAngleTarget += motorSpeedTarget * POLE_PAIRS / (float)SAMPLE_FREQUENCY;
-
-
-
-
-			// Clip electrical angle target to 1/8 of a circle if it's gone haywire
-			if (electricalAngleTarget - ENC_LastFullAngleRad * POLE_PAIRS > PID_CLIP) electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS + PID_CLIP;
-			if (ENC_LastFullAngleRad * POLE_PAIRS - electricalAngleTarget > PID_CLIP) electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS - PID_CLIP;
-
-
-			// Pass electrical angle target to motor position controller
-			PID_MotorPositionWithVoltage.target = electricalAngleTarget;
-
-			// Set phase voltage with motor position controller
-			phaseVoltage = -runPID(&PID_MotorPositionWithVoltage, ENC_LastFullAngleRad * POLE_PAIRS);
-
-			// Calculate current electrical angle
-			electricalAngle = normalizeAngle((float)POLE_PAIRS * ENC_LastAngleRad - MOT_ZeroElectricAngle);
-
-			// Set phase voltage (if the last PID is turned on)
-			MOT_SetPhaseVoltage(PID_WeightAngleWithMotorSpeed.on ? phaseVoltage : 0, electricalAngle);
-
-
-
 
 
 
@@ -641,11 +522,69 @@ int main(void) {
 
 
 
+
+			/// PIDs
+
+			// Pass position target to position PID
+			PID_BibiPositionWithBibiSpeed.target = positionTarget;
+
+			// Pass calculated speed target + PID result to speed PID
+			PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
+
+			// Set angle target based on acceleration feed forward and diabolo speed PID
+			PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
+
+			// Set motor speed target with angle PID
+			motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
+
+			// Limit motor speed (might not be necessary anymore with encoders)
+			motorSpeedTarget = LIMIT(-PID_WeightAngleWithMotorSpeed.limit, motorSpeedTarget, PID_WeightAngleWithMotorSpeed.limit);
+
+			// If the weight angle PID is on
+			if (PID_WeightAngleWithMotorSpeed.on){
+
+				// Set electrical angle target through desired motor speed
+				electricalAngleTarget += motorSpeedTarget * POLE_PAIRS / (float)SAMPLE_FREQUENCY;
+			}
+
+			else {
+				motorSpeedTarget = 0;
+			}
+
+			// Clip electrical angle target to 1/8 of a circle if it's gone haywire
+			if (electricalAngleTarget - ENC_LastFullAngleRad * POLE_PAIRS > PID_CLIP) electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS + PID_CLIP;
+			if (ENC_LastFullAngleRad * POLE_PAIRS - electricalAngleTarget > PID_CLIP) electricalAngleTarget = ENC_LastFullAngleRad * POLE_PAIRS - PID_CLIP;
+
+
+
+			// Pass electrical angle target to motor position controller
+			PID_MotorPositionWithVoltage.target = electricalAngleTarget;
+
+			// Set phase voltage with motor position controller
+			phaseVoltage = -runPID(&PID_MotorPositionWithVoltage, ENC_LastFullAngleRad * POLE_PAIRS);
+
+			// Calculate current electrical angle
+			electricalAngle = normalizeAngle((float)POLE_PAIRS * ENC_LastAngleRad - MOT_ZeroElectricAngle);
+
+			// Set phase voltage (if the last PID is turned on)
+			MOT_SetPhaseVoltage(PID_MotorPositionWithVoltage.on ? phaseVoltage : 0, electricalAngle);
+
+
+
+
+
+
+
+
+
+
+
+
 			// Print debug data
-			myData.a = imu_data.gyroZerod.z;
-			myData.b = PID_MotorPositionWithVoltage.error;
-			myData.c = PID_MotorPositionWithVoltage.derivative;
-			myData.d = ENC_LastFullAngleRad;
+			myData.a = PID_BibiPositionWithBibiSpeed.target;
+			myData.b = diaboloPosition;
+			myData.c = speedTarget;
+			myData.d = diaboloSpeed;
 			myData.e = 0;
 			myData.f = 0;
 

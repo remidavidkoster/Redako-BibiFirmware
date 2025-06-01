@@ -21,14 +21,11 @@ struct Movement {
 	uint32_t running;
 	uint32_t startTimestamp;
 	uint32_t endTimestamp;
-	uint32_t stoppingTimestamp;
-	float accDistance;
-	float accAngle;
-	float coastDistance;
-	float decAngle;
+	float newPosition;
+	float maxSpeed;
+	float acceleration;
 	float startOffset;
 	int direction;
-	int step;
 };
 
 
@@ -38,7 +35,6 @@ struct Movement movement = {
 		.startTimestamp = 0,
 		.startOffset = 0.0f,
 		.direction = 1
-
 };
 
 
@@ -51,12 +47,10 @@ enum {
 
 // Structure to hold a single movement
 struct MovementStep {
-    int direction;       // Direction [LEFT, RIGHT]
-    float accDistance;   // Acceleration distance [m]
-    float accAngle;      // Acceleration angle [0°-60°]
-    float coastDistance; // Coast distance [m]
-    float decAngle;      // Deceleration angle [0°-60°]
-    uint32_t startTime;         // Delay before this movement starts [s]
+    float newPosition;
+    float maxSpeed;
+    float acceleration;
+    uint32_t startTime;   // Delay before this movement starts [s]
 };
 
 #define MAX_QUE_LENGTH 100
@@ -67,11 +61,9 @@ uint8_t lastCueStarted;
 
 
 void startMovement(struct MovementStep step) {
-    movement.direction = step.direction;
-    movement.accDistance = step.accDistance;
-    movement.accAngle = step.accAngle;
-    movement.coastDistance = step.coastDistance;
-    movement.decAngle = step.decAngle;
+    movement.newPosition = step.newPosition;
+    movement.maxSpeed = step.maxSpeed;
+    movement.acceleration = step.acceleration;
     movement.start = 1;
 }
 
