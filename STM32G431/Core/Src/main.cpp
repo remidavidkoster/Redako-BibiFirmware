@@ -221,12 +221,11 @@ float accelerationFeedForwardGain = -80.0f;           // Feedforward gain
 
 
 MotionCommand debugCMD = {
-		.command = COMMAND_MOVE,
+		.command = COMMAND_MOVE_LEFT_SIDE,
 		.bibiNumber = 0,
 		.newPosition = 50,
 		.maxSpeed = 10,
 		.acceleration = 10,
-		.startDelay = 0
 };
 
 uint8_t sendMessage;
@@ -464,46 +463,43 @@ int main(void) {
 				NRF_ReceiveTimestamp = TIM2->CNT;
 
 
-				if (BIBI_Mode == CUE_CONTROLLED){
-
-					// Start cues if we have to
-					if ((buffer[0] == REMOTE_V1 || buffer[0] == REMOTE_V2) && (buffer[2] == MODE_TEST || buffer[2] == MODE_FIRE)){
-						if (buffer[3] == 1) CUE_Start(BIBI_Number, 1);
-						if (buffer[3] == 2) CUE_Start(BIBI_Number, 2);
-						if (buffer[3] == 4) CUE_Start(BIBI_Number, 3);
-						if (buffer[3] == 8) CUE_Start(BIBI_Number, 4);
-
-						// Shut down Bibi if all buttons are pressed at once
-						if (buffer[3] == 15) SYS_Shutdown();
-					}
-				}
-
 				// If we're listening to wireless motion commands
 				if (BIBI_Mode == MOTION_CONTROLLED){
+					static MotionCommand lastCmd;
 
-					// Copy the buffer to the command data structure
-					MotionCommand cmd;
-					memcpy(&cmd, buffer, sizeof(MotionCommand));
+					// If the new command isn't the same as the last one
+					if (memcmp(&lastCmd, buffer, sizeof(MotionCommand))){
 
-					// If we have to move
-					if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0) && cmd.command == COMMAND_MOVE){
+						// Copy the buffer to the command data structure
+						MotionCommand cmd;
+						memcpy(&cmd, buffer, sizeof(MotionCommand));
+						memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
 
-						// Queue the sent movement
-						queueMovement((struct MovementStep){cmd.newPosition / 100.0f, cmd.maxSpeed / 100.0f, cmd.acceleration / 100.0f}, cmd.startDelay);
-					}
+						// Switch byte order so QLab values make sense
+						cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
 
-					// Shut down if we get a shutdown command
-					if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0) && cmd.command == COMMAND_SHUTDOWN){
-						SYS_Shutdown();
+
+
+						// If we have to move
+						if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))) && (cmd.command == COMMAND_MOVE_LEFT_SIDE || cmd.command == COMMAND_MOVE_RIGHT_SIDE)){
+
+							// Switch byte order so QLab values make sense
+							cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
+
+							// Check movementSide
+							int8_t movementSide = cmd.command == COMMAND_MOVE_LEFT_SIDE ? 1 : -1;
+
+							// Queue the sent movement
+							queueMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
+						}
+
+						// Shut down if we get a shutdown command
+						if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0) && cmd.command == COMMAND_SHUTDOWN){
+							SYS_Shutdown();
+						}
 					}
 				}
 			}
-
-			// If we haven't had a message in 5 seconds, reset the last cue started (for debugging purposes)
-			if (TIM2->CNT - NRF_ReceiveTimestamp > 5000000){
-				lastCueStarted = 0;
-			}
-
 
 
 

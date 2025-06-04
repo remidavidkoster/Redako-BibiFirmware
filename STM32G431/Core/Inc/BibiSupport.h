@@ -63,14 +63,6 @@ void BAT_VoltageToRGB(float voltage) {
 	RGB_Set(r * RGB_Brightness * RGB_Brightness, g * RGB_Brightness * RGB_Brightness, b * RGB_Brightness * RGB_Brightness);
 }
 
-void SYS_ButShutdown(){
-
-	// Button shut down
-	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
-		SYS_Shutdown();
-	}
-}
-
 
 void SYS_Shutdown(){
 	RGB_Set(1, 0, 0);
@@ -86,6 +78,18 @@ void SYS_Shutdown(){
 	RGB_Set(0, 0, 0);
 	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
 }
+
+
+void SYS_ButShutdown(){
+
+	// Button shut down
+	if (!HAL_GPIO_ReadPin(BUT2_GPIO_Port, BUT2_Pin)){
+		SYS_Shutdown();
+	}
+}
+
+
+
 
 
 /// ADC Stuff

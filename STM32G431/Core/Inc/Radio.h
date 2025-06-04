@@ -52,17 +52,18 @@ void NRF_ConfigCueButtonControlled() {
 #pragma pack(push, 1)
 typedef struct {
 	uint8_t command;
-    uint8_t bibiNumber;
-    int16_t newPosition;
-    uint8_t maxSpeed;
-    uint8_t acceleration;
-    uint16_t startDelay;
+	uint16_t bibiNumber;
+	uint16_t newPosition;
+	uint8_t maxSpeed;
+	uint8_t acceleration;
 } MotionCommand;
 #pragma pack(pop)
 
 
+
 enum {
-	COMMAND_MOVE = 10,
+	COMMAND_MOVE_LEFT_SIDE = 10,
+	COMMAND_MOVE_RIGHT_SIDE = 11,
 	COMMAND_SHUTDOWN = 20
 };
 

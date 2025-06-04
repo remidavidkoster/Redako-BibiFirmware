@@ -16,7 +16,7 @@ uint8_t channel;
 // Payload width in uint8_ts default 16 max 32.
 uint8_t payload;
 
-uint8_t softSpiTransfer(uint8_t txByte) {
+uint8_t spiTransfer(uint8_t txByte) {
 
 //		HAL_SPI_DeInit(&hspi2);
 //		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
@@ -79,14 +79,14 @@ uint8_t softSpiTransfer(uint8_t txByte) {
 void transferSync(uint8_t *dataout, uint8_t *datain, uint8_t len) {
 	uint8_t i;
 	for (i = 0; i < len; i++) {
-		datain[i] = softSpiTransfer(dataout[i]);
+		datain[i] = spiTransfer(dataout[i]);
 	}
 }
 
 void transmitSync(uint8_t *dataout, uint8_t len) {
 	uint8_t i;
 	for (i = 0; i < len; i++) {
-		softSpiTransfer(dataout[i]);
+		spiTransfer(dataout[i]);
 	}
 }
 
@@ -158,7 +158,7 @@ void NRF_GetData(uint8_t * data) {
 	// Reads payload uint8_ts into data array
 
 	csnLow();                               // Pull down chip select
-	softSpiTransfer(R_RX_PAYLOAD);            // Send cmd to read rx payload
+	spiTransfer(R_RX_PAYLOAD);            // Send cmd to read rx payload
 	transferSync(data, data, payload); // Read payload
 	csnHigh();                               // Pull up chip select
 	// NVI: per product spec, p 67, note c:
@@ -175,8 +175,8 @@ void NRF_GetData(uint8_t * data) {
 // Clocks only one uint8_t into the given MiRF register
 void configRegister(uint8_t reg, uint8_t value) {
 	csnLow();
-	softSpiTransfer(W_REGISTER | (REGISTER_MASK & reg));
-	softSpiTransfer(value);
+	spiTransfer(W_REGISTER | (REGISTER_MASK & reg));
+	spiTransfer(value);
 	csnHigh();
 }
 
@@ -184,7 +184,7 @@ void configRegister(uint8_t reg, uint8_t value) {
 // Reads an array of uint8_ts from the given start position in the MiRF registers.
 void readRegister(uint8_t reg, uint8_t * value, uint8_t len) {
 	csnLow();
-	softSpiTransfer(R_REGISTER | (REGISTER_MASK & reg));
+	spiTransfer(R_REGISTER | (REGISTER_MASK & reg));
 	transferSync(value, value, len);
 	csnHigh();
 }
@@ -192,7 +192,7 @@ void readRegister(uint8_t reg, uint8_t * value, uint8_t len) {
 // Writes an array of uint8_ts into inte the MiRF registers.
 void writeRegister(uint8_t reg, uint8_t * value, uint8_t len) {
 	csnLow();
-	softSpiTransfer(W_REGISTER | (REGISTER_MASK & reg));
+	spiTransfer(W_REGISTER | (REGISTER_MASK & reg));
 	transmitSync(value, len);
 	csnHigh();
 }
@@ -217,11 +217,11 @@ void NRF_Send(uint8_t *value) {
 	powerUpTx();                   // Set to transmitter mode , Power up
 
 	csnLow();                      // Pull down chip select
-	softSpiTransfer(FLUSH_TX);     // Write cmd to flush tx fifo
+	spiTransfer(FLUSH_TX);     // Write cmd to flush tx fifo
 	csnHigh();                     // Pull up chip select
 
 	csnLow();                      // Pull down chip select
-	softSpiTransfer(W_TX_PAYLOAD); // Write cmd to write payload
+	spiTransfer(W_TX_PAYLOAD); // Write cmd to write payload
 	transmitSync(value, payload);  // Write payload
 	csnHigh();                     // Pull up chip select
 
@@ -261,7 +261,7 @@ void powerUpRx() {
 
 void flushRx() {
 	csnLow();
-	softSpiTransfer(FLUSH_RX);
+	spiTransfer(FLUSH_RX);
 	csnHigh();
 }
 
