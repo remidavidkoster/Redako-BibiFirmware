@@ -47,6 +47,9 @@ float SPEED_ALPHA = 0.01f;
 float ACCEL_ALPHA = 0.005f;
 
 uint8_t notYetMoved = 1;
+
+uint8_t firstMovementLoop;
+
 int8_t movementSide;
 
 
@@ -132,6 +135,114 @@ volatile PIDController PID_BibiPositionWithBibiSpeed = {
 
 
 
+// State: [position, velocity, acceleration]
+typedef struct {
+	float x[3];      // State estimate
+	float P[3][3];   // Covariance matrix
+} KalmanFilter;
+
+KalmanFilter kf;
+
+
+
+
+void kalman_init(KalmanFilter *kf) {
+    kf->x[0] = 0.0f; // position
+    kf->x[1] = 0.0f; // velocity
+    kf->x[2] = 0.0f; // acceleration
+
+    // Initialize P to identity (can scale if needed)
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            kf->P[i][j] = (i == j) ? 1.0f : 0.0f;
+        }
+    }
+}
+
+#define DT (1.0f / SAMPLE_FREQUENCY) // Time step (adjust as needed)
+
+// Noise parameters — TUNE THESE
+float R = 0.001f; // Measurement noise variance
+float Q[3] = {1e-4f, 1e-3f, 1e-2f}; // Process noise for x, v, a
+
+
+
+void kalman_update(KalmanFilter *kf, float z_measured) {
+    // Motion model
+    float A[3][3] = {
+        {1.0f, DT, 0.5f * DT * DT},
+        {0.0f, 1.0f, DT},
+        {0.0f, 0.0f, 1.0f}
+    };
+
+    float H[3] = {1.0f, 0.0f, 0.0f}; // Only position is observed
+
+    float x_pred[3];
+    float P_pred[3][3];
+
+    // Predict state: x_pred = A * x
+    for (int i = 0; i < 3; i++) {
+        x_pred[i] = 0.0f;
+        for (int j = 0; j < 3; j++) {
+            x_pred[i] += A[i][j] * kf->x[j];
+        }
+    }
+
+    // Predict covariance: P_pred = A * P * A^T + Q
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            P_pred[i][j] = 0.0f;
+            for (int k = 0; k < 3; k++) {
+                for (int l = 0; l < 3; l++) {
+                    P_pred[i][j] += A[i][k] * kf->P[k][l] * A[j][l]; // Correct matrix mult
+                }
+            }
+            if (i == j) {
+                P_pred[i][j] += Q[i]; // Add process noise to diagonal
+            }
+        }
+    }
+
+    // Kalman Gain: K = P_pred * H^T / (H * P_pred * H^T + R)
+    float S = R;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            S += H[i] * P_pred[i][j] * H[j];
+        }
+    }
+
+    float K[3];
+    for (int i = 0; i < 3; i++) {
+        K[i] = 0.0f;
+        for (int j = 0; j < 3; j++) {
+            K[i] += P_pred[i][j] * H[j];
+        }
+        K[i] /= S;
+    }
+
+    // Update state: x = x_pred + K * (z - H * x_pred)
+    float z_pred = 0.0f;
+    for (int i = 0; i < 3; i++) {
+        z_pred += H[i] * x_pred[i];
+    }
+
+    float y = z_measured - z_pred;
+
+    for (int i = 0; i < 3; i++) {
+        kf->x[i] = x_pred[i] + K[i] * y;
+    }
+
+    // Update covariance: P = P_pred - K * H * P_pred
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            float KH = 0.0f;
+            for (int k = 0; k < 3; k++) {
+                KH += K[i] * H[k] * P_pred[k][j];
+            }
+            kf->P[i][j] = P_pred[i][j] - KH;
+        }
+    }
+}
 
 
 
@@ -355,25 +466,6 @@ int main(void) {
 
 
 
-
-			// Debug movements started 15 seconds after startup. Disabled when moved = 1. Enabled when moved = 0.
-			static int moved = 1;
-			if (!moved && TIM2->CNT > 15000000){
-				moved = 1;
-				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
-				queueMovement((struct MovementStep){0.0, 1.0, 0.2}, 0);
-				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
-				queueMovement((struct MovementStep){0.0, 1.0, 0.2}, 0);
-				queueMovement((struct MovementStep){0.5, 1.0, 0.2}, 0);
-				queueMovement((struct MovementStep){0.0, 1.0, 0.2}, 0);
-			}
-
-
-
-
-
-
-
 			// If we still have queued movements, and there's currently none running
 			if (queuedMovementCount && !movement.running){
 
@@ -407,7 +499,11 @@ int main(void) {
 					// Turn on the PIDs, and set the zero position
 					PID_WeightAngleWithMotorSpeed.on = 1;
 					diaboloZeroPosition = diaboloPosition;
+					diaboloPosition = 0;
+					lastDiaboloPosition = 0;
+					lastDiaboloSpeed = 0;
 					notYetMoved = 0;
+//				    kalman_init(&kf);
 				}
 
 				// Turn on speed PID
@@ -424,6 +520,9 @@ int main(void) {
 				p.rampRatio = LIMIT(0.2f, movement.acceleration, 2.55f);
 				p.maxSpeed = LIMIT(0.2f, movement.maxSpeed, 2.55f);
 
+				// Flag so the movement loop doesn't funk things up in the first run
+				firstMovementLoop = 1;
+
 				// Calculate the motion profile from the distance, acceleration, and max speed we've set.
 				distanceSpeedRampRatioToProfileTimes(p);
 			}
@@ -434,6 +533,14 @@ int main(void) {
 
 				// Calculate position and speed targets
 				positionTarget = (movement.startOffset + movement.direction * quinticPositionProfile(runTime, p.rampTime, p.cruiseTime, p.maxSpeed));
+
+				// Set the lastPositionTarget to the positionTarget the first time we get here. Otherwise we get strange feedforwards values
+				if (firstMovementLoop){
+					firstMovementLoop = 0;
+					lastPositionTarget = positionTarget;
+					lastSpeedTarget = 0;
+					PID_BibiSpeedWithWeightAngle.target = 0;
+				}
 				speedTarget = (positionTarget - lastPositionTarget) * SAMPLE_FREQUENCY;
 				lastPositionTarget = positionTarget;
 
@@ -520,7 +627,7 @@ int main(void) {
 							startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
 						}
 
-						// If we directly want to command the counterweight angle for smoother but less controlled motion
+						// If we directly want to command the counter weight angle for smoother but less controlled motion
 						if (cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS || cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS){
 
 							// Turn off speed PID
@@ -567,31 +674,6 @@ int main(void) {
 					}
 				}
 			}
-
-
-
-
-
-
-			// Debug send command
-			if (sendMessage == 1 || !HAL_GPIO_ReadPin(BUT3_GPIO_Port, BUT3_Pin)) {
-				sendMessage = 0;
-
-
-
-				memcpy(buffer, &debugCMD, sizeof(debugCMD));
-				NRF_Send(buffer);
-				while (NRF_IsSending());
-
-				while (!HAL_GPIO_ReadPin(BUT3_GPIO_Port, BUT3_Pin));
-			}
-
-
-
-
-
-
-
 
 
 
@@ -701,23 +783,17 @@ int main(void) {
 			MOT_SetPhaseVoltage(PID_MotorPositionWithVoltage.on ? phaseVoltage : 0, electricalAngle);
 
 
-
-
-
-
-
-
-
+//			kalman_update(&kf, diaboloPosition);
 
 
 
 			// Print debug data
-			myData.a = PID_WeightAngleWithMotorSpeed.target;
-			myData.b = madgwick.angleFullDeg;
-			myData.c = PID_WeightAngleWithMotorSpeed.derivative;
-			myData.d = PID_WeightAngleWithMotorSpeed.output;
-			myData.e = microsUsed;
-			myData.f = 0;
+			myData.a = diaboloPosition;
+			myData.b = diaboloSpeed;
+			myData.c = diaboloAcceleration;
+			myData.d = kf.x[0];
+			myData.e = kf.x[1];
+			myData.f = kf.x[2];
 
 			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
 
