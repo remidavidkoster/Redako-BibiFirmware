@@ -406,10 +406,12 @@ int main(void) {
 
 					// Turn on the PIDs, and set the zero position
 					PID_WeightAngleWithMotorSpeed.on = 1;
-					PID_BibiSpeedWithWeightAngle.on = 1;
 					diaboloZeroPosition = diaboloPosition;
 					notYetMoved = 0;
 				}
+
+				// Turn on speed PID
+				PID_BibiSpeedWithWeightAngle.on = 1;
 
 				// Set current position as offset. Works because we're working in absolute units now.
 				movement.startOffset = diaboloPosition;
@@ -426,7 +428,6 @@ int main(void) {
 				distanceSpeedRampRatioToProfileTimes(p);
 			}
 
-			if (!PID_BibiSpeedWithWeightAngle.on) PID_BibiSpeedWithWeightAngle.integral = 0;
 
 			if (movement.running){
 				float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
@@ -519,8 +520,30 @@ int main(void) {
 							startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
 						}
 
+						// If we directly want to command the counterweight angle for smoother but less controlled motion
+						if (cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS || cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS){
+
+							// Turn off speed PID
+							PID_BibiSpeedWithWeightAngle.on = 0;
+
+							// Base direction to move on current position and commanded direction
+							movementSide = 0;
+							if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = 1;
+							if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = -1;
+							if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = -1;
+							if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = 1;
+
+							// Directly set the weight angle PID target
+							PID_WeightAngleWithMotorSpeed.target = cmd.acceleration * movementSide;
+						}
+
 						// If we get a shutdown command with the correct safety position value
 						if (cmd.command == COMMAND_SHUTDOWN && cmd.newPosition == COMMAND_SHUTDOWN_SAFETY){
+
+							// If acceleration value is 1, we do a light-less turnoff
+							if (cmd.acceleration == 1){
+								HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+							}
 
 							// Turn Bibis off
 							SYS_Shutdown();
@@ -582,7 +605,6 @@ int main(void) {
 			// Filter target acceleration (more relevant for remote than for quintic curves
 			accelerationTargetFiltered = (1.0f - accelerationTargetAlpha) * accelerationTargetFiltered + accelerationTargetAlpha * accelerationTarget;
 
-
 			// Add filtered derivative-based feedforward to angle to help drive acceleration
 			float angleFeedForward = accelerationFeedForwardGain * accelerationTargetFiltered;
 
@@ -625,14 +647,23 @@ int main(void) {
 
 			/// PIDs
 
-			// Pass position target to position PID
-			PID_BibiPositionWithBibiSpeed.target = positionTarget;
+			// If we're running the speed PID
+			if (PID_BibiSpeedWithWeightAngle.on){
 
-			// Pass calculated speed target + PID result to speed PID
-			PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
+				// Pass position target to position PID
+				PID_BibiPositionWithBibiSpeed.target = positionTarget;
 
-			// Set angle target based on acceleration feed forward and diabolo speed PID
-			PID_WeightAngleWithMotorSpeed.target = LIMIT(-90, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 90);
+				// Pass calculated speed target + PID result to speed PID
+				PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
+
+				// Set angle target based on acceleration feed forward and diabolo speed PID
+				PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
+			}
+
+			// If not clear the integral
+			else {
+				PID_BibiSpeedWithWeightAngle.integral = 0;
+			}
 
 			// Set motor speed target with angle PID
 			motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
