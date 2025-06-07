@@ -17,17 +17,13 @@ uint8_t channel;
 uint8_t payload;
 
 uint8_t spiTransfer(uint8_t txByte) {
+    // Wait until TXE (Transmit buffer empty)
+    while (!(SPI2->SR & SPI_SR_TXE));
+    *(volatile uint8_t *)&SPI2->DR = txByte;
 
-//		HAL_SPI_DeInit(&hspi2);
-//		hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;   // or HIGH
-//		hspi2.Init.CLKPhase    = SPI_PHASE_1EDGE;    // or 2EDGE
-//		HAL_SPI_Init(&hspi2);
-
-		uint8_t rxByte = 0x00;    // Variable to store received byte
-
-	HAL_SPI_TransmitReceive(&hspi2, &txByte, &rxByte, 1, HAL_MAX_DELAY);
-
-	return rxByte;
+    // Wait until RXNE (Receive buffer not empty)
+    while (!(SPI2->SR & SPI_SR_RXNE));
+    return *(volatile uint8_t *)&SPI2->DR;
 }
 
 

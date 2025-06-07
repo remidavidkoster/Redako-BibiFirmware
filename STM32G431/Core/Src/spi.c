@@ -59,6 +59,16 @@ void MX_SPI1_Init(void)
   }
   /* USER CODE BEGIN SPI1_Init 2 */
 
+	// Configure SPI1 CR2
+	SPI1->CR2 = SPI_CR2_FRXTH | SPI_CR2_DS_2 | SPI_CR2_DS_1 | SPI_CR2_DS_0;
+
+	// Short delay
+	for (volatile int i = 0; i < 1000; ++i) {
+		asm volatile ("nop");
+	}
+
+	// Enable SPI
+	SPI1->CR1 |= SPI_CR1_SPE;
   /* USER CODE END SPI1_Init 2 */
 
 }
@@ -93,6 +103,16 @@ void MX_SPI2_Init(void)
   }
   /* USER CODE BEGIN SPI2_Init 2 */
 
+	// Configure SPI1 CR2
+	SPI2->CR2 = SPI_CR2_FRXTH | SPI_CR2_DS_2 | SPI_CR2_DS_1 | SPI_CR2_DS_0;
+
+	// Short delay
+	for (volatile int i = 0; i < 1000; ++i) {
+		asm volatile ("nop");
+	}
+
+	// Enable SPI
+	SPI2->CR1 |= SPI_CR1_SPE;
   /* USER CODE END SPI2_Init 2 */
 
 }
@@ -126,7 +146,16 @@ void MX_SPI3_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN SPI3_Init 2 */
+	// Configure SPI1 CR2
+	SPI3->CR2 = SPI_CR2_FRXTH | SPI_CR2_DS_2 | SPI_CR2_DS_1 | SPI_CR2_DS_0;
 
+	// Short delay
+	for (volatile int i = 0; i < 1000; ++i) {
+		asm volatile ("nop");
+	}
+
+	// Enable SPI
+	SPI3->CR1 |= SPI_CR1_SPE;
   /* USER CODE END SPI3_Init 2 */
 
 }

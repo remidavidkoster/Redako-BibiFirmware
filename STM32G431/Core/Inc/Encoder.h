@@ -31,14 +31,27 @@ const int32_t sensor_direction = 1;
 #define _2PI 6.28318530718f
 
 
+
+uint8_t spiTransferENC(uint8_t txByte) {
+    // Wait until TXE (Transmit buffer empty)
+    while (!(SPI3->SR & SPI_SR_TXE));
+    *(volatile uint8_t *)&SPI3->DR = txByte;
+
+    // Wait until RXNE (Receive buffer not empty)
+    while (!(SPI3->SR & SPI_SR_RXNE));
+    return *(volatile uint8_t *)&SPI3->DR;
+}
+
+
 void ENC_Update(){
 	HAL_GPIO_WritePin(SPI3_CSN_GPIO_Port, SPI3_CSN_Pin, (GPIO_PinState)0);
 
 	txData[0] = 0b1010 << 4;
 	txData[1] = 0x03;
 
-	HAL_SPI_TransmitReceive(&hspi3, txData, rxData, 6, HAL_MAX_DELAY);
-
+    for (int i = 0; i < 6; i++) {
+    	rxData[i] = spiTransferENC(txData[i]);
+    }
 	lastRawAngle = 0;
 
 	// Extract bits from rawData1 and rawData2

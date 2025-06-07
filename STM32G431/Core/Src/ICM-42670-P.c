@@ -176,7 +176,15 @@ HAL_StatusTypeDef icm42670_start_gyro(ICM42670 *sensor, uint8_t rate, uint8_t fr
 
 
 
+uint8_t spiTransferAccel(uint8_t txByte) {
+    // Wait until TXE (Transmit buffer empty)
+    while (!(SPI1->SR & SPI_SR_TXE));
+    *(volatile uint8_t *)&SPI1->DR = txByte;
 
+    // Wait until RXNE (Receive buffer not empty)
+    while (!(SPI1->SR & SPI_SR_RXNE));
+    return *(volatile uint8_t *)&SPI1->DR;
+}
 
 sensorXYZFloat icm42670_read_accel_gyro(ICM42670 *sensor, sensorXYZFloat *gyro_out) {
     uint8_t tx[13] = {0};     // 1 byte for register address + 12 bytes data
@@ -188,7 +196,11 @@ sensorXYZFloat icm42670_read_accel_gyro(ICM42670 *sensor, sensorXYZFloat *gyro_o
     tx[0] = ICM42670_REG_ACCEL_DATA_X1 | 0x80;
 
     HAL_GPIO_WritePin(SPI1_CSN_GPIO_Port, SPI1_CSN_Pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive(&hspi1, tx, rx, 13, HAL_MAX_DELAY);
+
+    for (int i = 0; i < 13; i++) {
+        rx[i] = spiTransferAccel(tx[i]);
+    }
+
     HAL_GPIO_WritePin(SPI1_CSN_GPIO_Port, SPI1_CSN_Pin, GPIO_PIN_SET);
 
     // Parse accelerometer raw data

@@ -77,12 +77,21 @@ void distanceSpeedRampRatioToProfileTimes(PositionProfile &p){
 
 // Quintic curve function [0-1] in [0-1] out
 float quinticCurve(float x) {
-    return 10 * pow(x, 3) - 15 * pow(x, 4) + 6 * pow(x, 5);
+    float x2 = x * x;
+    float x3 = x2 * x;
+    float x4 = x3 * x;
+    float x5 = x4 * x;
+    return 10.0f * x3 - 15.0f * x4 + 6.0f * x5;
 }
 
 // Quintic integral function [0-1] in [0-0.5] out
 float quinticIntegral(float x) {
-    return pow(x, 6) - 3 * pow(x, 5) + 2.5 * pow(x, 4);
+    float x2 = x * x;
+    float x3 = x2 * x;
+    float x4 = x3 * x;
+    float x5 = x4 * x;
+    float x6 = x5 * x;
+    return x6 - 3.0f * x5 + 2.5f * x4;
 }
 
 // Quantic Curve Based Speed Profile

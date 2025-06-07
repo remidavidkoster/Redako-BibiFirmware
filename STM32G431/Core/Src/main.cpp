@@ -685,7 +685,7 @@ int main(void) {
 			myData.b = madgwick.angleFullDeg;
 			myData.c = PID_WeightAngleWithMotorSpeed.derivative;
 			myData.d = PID_WeightAngleWithMotorSpeed.output;
-			myData.e = 0;
+			myData.e = microsUsed;
 			myData.f = 0;
 
 			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
