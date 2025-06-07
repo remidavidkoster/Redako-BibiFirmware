@@ -104,7 +104,7 @@ volatile PIDController PID_BibiSpeedWithWeightAngle = {
 		.i = 40.0f,
 		.d = 0.0f,
 		.alpha = 0.01f,
-		.limit = 120.0f,
+		.limit = 90.0f,
 		.target = 0.0f,
 		.reset_threshold = 10000.0f,
 
@@ -632,7 +632,7 @@ int main(void) {
 			PID_BibiSpeedWithWeightAngle.target = speedTarget + runPID(&PID_BibiPositionWithBibiSpeed, diaboloPosition);
 
 			// Set angle target based on acceleration feed forward and diabolo speed PID
-			PID_WeightAngleWithMotorSpeed.target = LIMIT(-120, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 120);
+			PID_WeightAngleWithMotorSpeed.target = LIMIT(-90, angleFeedForward + runPID(&PID_BibiSpeedWithWeightAngle, diaboloSpeed), 90);
 
 			// Set motor speed target with angle PID
 			motorSpeedTarget += runPID(&PID_WeightAngleWithMotorSpeed, madgwick.angleFullDeg);
@@ -681,10 +681,10 @@ int main(void) {
 
 
 			// Print debug data
-			myData.a = PID_BibiPositionWithBibiSpeed.target;
-			myData.b = diaboloPosition;
-			myData.c = speedTarget;
-			myData.d = diaboloSpeed;
+			myData.a = PID_WeightAngleWithMotorSpeed.target;
+			myData.b = madgwick.angleFullDeg;
+			myData.c = PID_WeightAngleWithMotorSpeed.derivative;
+			myData.d = PID_WeightAngleWithMotorSpeed.output;
 			myData.e = 0;
 			myData.f = 0;
 
