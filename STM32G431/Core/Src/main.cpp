@@ -23,21 +23,6 @@
 #include "quintic.h"
 
 void SystemClock_Config(void);
-typedef enum {
-	CUE_CONTROLLED,
-	REMOTE_CONTROLLED,
-	MOTION_CONTROLLED
-} BIBI_Mode_t;
-
-BIBI_Mode_t BIBI_Mode = MOTION_CONTROLLED;
-
-
-
-
-
-
-
-
 
 
 float motorSpeedTarget;
@@ -50,6 +35,8 @@ double diaboloAngleFullDeg;
 double diaboloPosition;
 double lastDiaboloPosition;
 
+float diaboloZeroPosition;
+
 float diaboloSpeed;
 float lastDiaboloSpeed;
 float diaboloAcceleration;
@@ -59,8 +46,8 @@ float diaboloAcceleration;
 float SPEED_ALPHA = 0.01f;
 float ACCEL_ALPHA = 0.005f;
 
-
-
+uint8_t notYetMoved = 1;
+int8_t movementSide;
 
 
 /// PID Stuff
@@ -121,7 +108,7 @@ volatile PIDController PID_BibiSpeedWithWeightAngle = {
 		.target = 0.0f,
 		.reset_threshold = 10000.0f,
 
-		.on = 1
+		.on = 0
 };
 
 
@@ -221,7 +208,7 @@ float accelerationFeedForwardGain = -80.0f;           // Feedforward gain
 
 
 MotionCommand debugCMD = {
-		.command = COMMAND_MOVE_LEFT_SIDE,
+		.command = COMMAND_QUEUE_LEFT_SIDE,
 		.bibiNumber = 0,
 		.newPosition = 50,
 		.maxSpeed = 10,
@@ -283,13 +270,6 @@ int main(void) {
 		CHG_RunLogic();
 	}
 
-
-
-	// If third button is pressed during startup, this will be remote controlled
-	if (!HAL_GPIO_ReadPin(BUT3_GPIO_Port, BUT3_Pin)){
-		BIBI_Mode = MOTION_CONTROLLED;
-	}
-
 	// Keep itself on
 	HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)1);
 
@@ -300,8 +280,7 @@ int main(void) {
 	IMU_Init();
 
 	// Config radio
-	if (BIBI_Mode == MOTION_CONTROLLED)	NRF_ConfigMotionControlled();
-	if (BIBI_Mode == CUE_CONTROLLED)	NRF_ConfigCueButtonControlled();
+	NRF_ConfigMotionControlled();
 
 	// Setup magnetic encoder
 	ENC_Setup();
@@ -421,6 +400,17 @@ int main(void) {
 				movement.startTimestamp = TIM2->CNT;
 				movement.running = 1;
 
+
+				// If this is our first move
+				if (notYetMoved){
+
+					// Turn on the PIDs, and set the zero position
+					PID_WeightAngleWithMotorSpeed.on = 1;
+					PID_BibiSpeedWithWeightAngle.on = 1;
+					diaboloZeroPosition = diaboloPosition;
+					notYetMoved = 0;
+				}
+
 				// Set current position as offset. Works because we're working in absolute units now.
 				movement.startOffset = diaboloPosition;
 
@@ -429,16 +419,14 @@ int main(void) {
 
 				// Movement planning
 				p.totalDistance = ABS(movement.newPosition - movement.startOffset);
-				p.rampRatio = movement.acceleration;
-				p.maxSpeed = movement.maxSpeed;
+				p.rampRatio = LIMIT(0.2f, movement.acceleration, 2.55f);
+				p.maxSpeed = LIMIT(0.2f, movement.maxSpeed, 2.55f);
 
 				// Calculate the motion profile from the distance, acceleration, and max speed we've set.
 				distanceSpeedRampRatioToProfileTimes(p);
-
-				// Turn on the PID
-				PID_WeightAngleWithMotorSpeed.on = 1;
 			}
 
+			if (!PID_BibiSpeedWithWeightAngle.on) PID_BibiSpeedWithWeightAngle.integral = 0;
 
 			if (movement.running){
 				float runTime = (TIM2->CNT - movement.startTimestamp) / 1000000.0f;
@@ -462,40 +450,96 @@ int main(void) {
 				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 				NRF_ReceiveTimestamp = TIM2->CNT;
 
+				// If the new command isn't the same as the last one
+				if (memcmp(&lastCmd, buffer, sizeof(MotionCommand))){
 
-				// If we're listening to wireless motion commands
-				if (BIBI_Mode == MOTION_CONTROLLED){
-					static MotionCommand lastCmd;
+					// Copy the buffer to the command data structure
+					MotionCommand cmd;
+					memcpy(&cmd, buffer, sizeof(MotionCommand));
+					memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
 
-					// If the new command isn't the same as the last one
-					if (memcmp(&lastCmd, buffer, sizeof(MotionCommand))){
+					// Switch byte orders so QLab values make sense
+					cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
+					cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
 
-						// Copy the buffer to the command data structure
-						MotionCommand cmd;
-						memcpy(&cmd, buffer, sizeof(MotionCommand));
-						memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
+					// If we have to do something
+					if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
 
-						// Switch byte order so QLab values make sense
-						cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
-
-
-
-						// If we have to move
-						if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))) && (cmd.command == COMMAND_MOVE_LEFT_SIDE || cmd.command == COMMAND_MOVE_RIGHT_SIDE)){
-
-							// Switch byte order so QLab values make sense
-							cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
+						// If we get a queued movement command
+						if (cmd.command == COMMAND_QUEUE_LEFT_SIDE || cmd.command == COMMAND_QUEUE_RIGHT_SIDE){
 
 							// Check movementSide
-							int8_t movementSide = cmd.command == COMMAND_MOVE_LEFT_SIDE ? 1 : -1;
+							movementSide = (cmd.command == COMMAND_QUEUE_LEFT_SIDE) ? 1 : -1;
 
-							// Queue the sent movement
+							// Queue movement
 							queueMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
 						}
 
-						// Shut down if we get a shutdown command
-						if ((cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0) && cmd.command == COMMAND_SHUTDOWN){
+						// If we get a queued relative movement command
+						if (cmd.command == COMMAND_RELATIVE_INWARDS || cmd.command == COMMAND_RELATIVE_OUTWARDS){
+
+							// Base direction to move, on current position, and commanded direction (only works once the diabolo is 'in the field' and knows what side he's on)
+							movementSide = 0;
+							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = 1;
+							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = -1;
+							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = -1;
+							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = 1;
+
+							// Queue movement
+							queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
+						}
+
+						// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
+						if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
+
+							// Base direction to move on current position and commanded direction
+							movementSide = 0;
+							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = 1;
+							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = -1;
+							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = -1;
+							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = 1;
+
+							// Clear movement queue
+							queuedMovementCount = 0;
+
+							// Queue movement
+							startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
+						}
+
+						// Or overwrite the current movement
+						if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
+
+							// Check movementSide
+							movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;
+
+							// Clear movement queue
+							queuedMovementCount = 0;
+
+							// Start new movement directly
+							startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
+						}
+
+						// If we get a shutdown command with the correct safety position value
+						if (cmd.command == COMMAND_SHUTDOWN && cmd.newPosition == COMMAND_SHUTDOWN_SAFETY){
+
+							// Turn Bibis off
 							SYS_Shutdown();
+						}
+
+						// If we have to turn the battery lights off
+						if (cmd.command == COMMAND_LIGHTS_OFF){
+
+							// Simply set brightness to 0. Still feels dangerous not to have an indication they're still on!
+							RGB_Brightness = 0;
+							RGB_On = 0;
+						}
+
+						// If we have to turn the battery lights back on
+						if (cmd.command == COMMAND_LIGHTS_ON){
+
+							// Simply set brightness to 1
+							RGB_Brightness = 1;
+							RGB_On = 1;
 						}
 					}
 				}
@@ -563,7 +607,7 @@ int main(void) {
 			diaboloAngleFullDeg = motorAngleFullDeg + madgwick.angleFullDeg;
 
 			// Diabolo position [m] since startup
-			diaboloPosition = diaboloAngleFullDeg / 360.0f * DIABOLO_CIRCUMFERENCE;
+			diaboloPosition = diaboloAngleFullDeg / 360.0f * DIABOLO_CIRCUMFERENCE - diaboloZeroPosition;
 
 			// Diabolo speed [m/s]
 			diaboloSpeed = SPEED_ALPHA * (diaboloPosition - lastDiaboloPosition) * (float)SAMPLE_FREQUENCY + (1.0f - SPEED_ALPHA) * diaboloSpeed;
