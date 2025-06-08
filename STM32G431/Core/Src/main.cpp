@@ -787,15 +787,15 @@ int main(void) {
 
 
 
-			// Print debug data
-			myData.a = diaboloPosition;
-			myData.b = diaboloSpeed;
-			myData.c = diaboloAcceleration;
-			myData.d = kf.x[0];
-			myData.e = kf.x[1];
-			myData.f = kf.x[2];
-
-			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
+//			// Print debug data
+//			myData.a = diaboloPosition;
+//			myData.b = diaboloSpeed;
+//			myData.c = diaboloAcceleration;
+//			myData.d = kf.x[0];
+//			myData.e = kf.x[1];
+//			myData.f = kf.x[2];
+//
+//			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
 
 
 			// Update timing variables
