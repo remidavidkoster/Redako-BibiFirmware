@@ -575,30 +575,30 @@ int main(void) {
 
 
 
-				// Store new interval in circular buffer
-				intervalBuffer[bufferIndex] = NRF_ReceiveInterval;
-				bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
-
-				// Update count until buffer fills
-				if (bufferCount < BUFFER_SIZE) {
-				    bufferCount++;
-				}
-
-				// Compute min, max, and mean
-				min = intervalBuffer[0];
-				max = intervalBuffer[0];
-				sum = 0;
-
-				for (uint32_t i = 0; i < bufferCount; i++) {
-				    uint32_t val = intervalBuffer[i];
-				    if (val < min) min = val;
-				    if (val > max) max = val;
-				    sum += val;
-				}
-
-				mean = (uint32_t)(sum / bufferCount);
-
-
+//				// Store new interval in circular buffer
+//				intervalBuffer[bufferIndex] = NRF_ReceiveInterval;
+//				bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
+//
+//				// Update count until buffer fills
+//				if (bufferCount < BUFFER_SIZE) {
+//				    bufferCount++;
+//				}
+//
+//				// Compute min, max, and mean
+//				min = intervalBuffer[0];
+//				max = intervalBuffer[0];
+//				sum = 0;
+//
+//				for (uint32_t i = 0; i < bufferCount; i++) {
+//				    uint32_t val = intervalBuffer[i];
+//				    if (val < min) min = val;
+//				    if (val > max) max = val;
+//				    sum += val;
+//				}
+//
+//				mean = (uint32_t)(sum / bufferCount);
+//
+//
 
 
 
