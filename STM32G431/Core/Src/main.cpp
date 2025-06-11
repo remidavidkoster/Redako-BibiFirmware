@@ -330,6 +330,21 @@ uint8_t sendMessage;
 
 
 
+#define BUFFER_SIZE 100
+
+uint32_t intervalBuffer[BUFFER_SIZE];
+uint32_t bufferIndex = 0;
+uint32_t bufferCount = 0;  // Track how many valid values are stored
+
+// Compute min, max, and mean
+uint32_t min ;
+uint32_t max ;
+uint64_t sum ;
+uint32_t mean;
+
+
+
+
 // Main loop
 int main(void) {
 
@@ -557,6 +572,39 @@ int main(void) {
 				NRF_GetData(buffer);
 				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 				NRF_ReceiveTimestamp = TIM2->CNT;
+
+
+
+				// Store new interval in circular buffer
+				intervalBuffer[bufferIndex] = NRF_ReceiveInterval;
+				bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
+
+				// Update count until buffer fills
+				if (bufferCount < BUFFER_SIZE) {
+				    bufferCount++;
+				}
+
+				// Compute min, max, and mean
+				min = intervalBuffer[0];
+				max = intervalBuffer[0];
+				sum = 0;
+
+				for (uint32_t i = 0; i < bufferCount; i++) {
+				    uint32_t val = intervalBuffer[i];
+				    if (val < min) min = val;
+				    if (val > max) max = val;
+				    sum += val;
+				}
+
+				mean = (uint32_t)(sum / bufferCount);
+
+
+
+
+
+
+
+
 
 				// If the new command isn't the same as the last one
 				if (memcmp(&lastCmd, buffer, sizeof(MotionCommand))){

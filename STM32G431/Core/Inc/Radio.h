@@ -87,7 +87,7 @@ void NRF_ConfigMotionControlled() {
 	setTADDR((uint8_t *)"TCMfx");
 	payload = sizeof(MotionCommand);
 	channel = 101;
-	NRF_Config(RF_DR_2MBPS | RF_PWR_0DBM);
+	NRF_Config(RF_DR_250KBPS | RF_PWR_0DBM);
 }
 
 
