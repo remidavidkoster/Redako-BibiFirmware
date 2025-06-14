@@ -39,7 +39,7 @@ static inline uint8_t BIBI_GetID(void) {
         }
     }
 
-    return 0; // No match found
+    return 1; // In case no match, use Bibi number 1 (used for debugging)
 }
 
 #endif /* INC_UID_H_ */

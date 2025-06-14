@@ -406,9 +406,6 @@ int main(void) {
 	// Get Bibi ID
 	BIBI_Number = BIBI_GetID();
 
-	// Overwrite for debugging
-	BIBI_Number = 1;
-
 	// Initialize IMU
 	IMU_Init();
 
