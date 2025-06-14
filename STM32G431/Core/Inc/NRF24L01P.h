@@ -151,7 +151,11 @@ void powerUpTx();
 void NRF_PowerDown();
 void setDataStuff(uint8_t dataStuff);
 
+void csnHigh();
+void csnLow();
 
+void ceHigh();
+void ceLow();
 
 uint8_t readInPin();
 

@@ -222,27 +222,27 @@ void kalman_update(KalmanFilter *kf, float z_measured) {
 	}
 
 	// Update state: x = x_pred + K * (z - H * x_pred)
-    		float z_pred = 0.0f;
-    		for (int i = 0; i < 3; i++) {
-    			z_pred += H[i] * x_pred[i];
-    		}
+	float z_pred = 0.0f;
+	for (int i = 0; i < 3; i++) {
+		z_pred += H[i] * x_pred[i];
+	}
 
-    		float y = z_measured - z_pred;
+	float y = z_measured - z_pred;
 
-    		for (int i = 0; i < 3; i++) {
-    			kf->x[i] = x_pred[i] + K[i] * y;
-    		}
+	for (int i = 0; i < 3; i++) {
+		kf->x[i] = x_pred[i] + K[i] * y;
+	}
 
-    		// Update covariance: P = P_pred - K * H * P_pred
-    		for (int i = 0; i < 3; i++) {
-    			for (int j = 0; j < 3; j++) {
-    				float KH = 0.0f;
-    				for (int k = 0; k < 3; k++) {
-    					KH += K[i] * H[k] * P_pred[k][j];
-    				}
-    				kf->P[i][j] = P_pred[i][j] - KH;
-    			}
-    		}
+	// Update covariance: P = P_pred - K * H * P_pred
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			float KH = 0.0f;
+			for (int k = 0; k < 3; k++) {
+				KH += K[i] * H[k] * P_pred[k][j];
+			}
+			kf->P[i][j] = P_pred[i][j] - KH;
+		}
+	}
 }
 
 
@@ -577,50 +577,21 @@ int main(void) {
 				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 				NRF_ReceiveTimestamp = TIM2->CNT;
 
-
-
-				//				// Store new interval in circular buffer
-				//				intervalBuffer[bufferIndex] = NRF_ReceiveInterval;
-				//				bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
-				//
-				//				// Update count until buffer fills
-				//				if (bufferCount < BUFFER_SIZE) {
-				//				    bufferCount++;
-				//				}
-				//
-				//				// Compute min, max, and mean
-				//				min = intervalBuffer[0];
-				//				max = intervalBuffer[0];
-				//				sum = 0;
-				//
-				//				for (uint32_t i = 0; i < bufferCount; i++) {
-				//				    uint32_t val = intervalBuffer[i];
-				//				    if (val < min) min = val;
-				//				    if (val > max) max = val;
-				//				    sum += val;
-				//				}
-				//
-				//				mean = (uint32_t)(sum / bufferCount);
-				//
-				//
-
-
 				// If the new command isn't the same as the last one
 				if (memcmp(&lastCmd, buffer, sizeof(MotionCommand))){
 
 					// Copy the buffer to the command data structure
 					MotionCommand cmd;
 					memcpy(&cmd, buffer, sizeof(MotionCommand));
-					memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
-
-					// If we got a valid CRC
-					if (cmd.crc == CRC_Calculate((uint8_t*)&cmd, sizeof(cmd) - 2)){
 
 					// Log command in circular buffer
 					logReceivedCommand(&cmd);
 
-					// If we have to do something
-					if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
+					// If we got a valid CRC
+					if (cmd.crc == CRC_Calculate((uint8_t*)&cmd, sizeof(cmd) - 2)){
+
+						// Do this here, to prevent invalid commands from re-starting a previous command
+						memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
 
 						// If we have to do something
 						if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
@@ -652,9 +623,8 @@ int main(void) {
 								queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
 							}
 
-							// Clear movement queue
-							queuedMovementCount = 0;
-							queuedMovementTail = queuedMovementHead;
+							// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
+							else if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
 
 								// Base direction to move on current position and commanded direction
 								movementSide = 0;
@@ -665,20 +635,21 @@ int main(void) {
 
 								// Clear movement queue
 								queuedMovementCount = 0;
+								queuedMovementTail = queuedMovementHead;
 
 								// Queue movement
 								startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
 							}
 
-							// Clear movement queue
-							queuedMovementCount = 0;
-							queuedMovementTail = queuedMovementHead;
+							// Or overwrite the current movement
+							else if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
 
 								// Check movementSide
 								movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;
 
 								// Clear movement queue
 								queuedMovementCount = 0;
+								queuedMovementTail = queuedMovementHead;
 
 								// Start new movement directly
 								startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
@@ -696,6 +667,10 @@ int main(void) {
 								if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = -1;
 								if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = -1;
 								if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = 1;
+
+								// Clear movement queue
+								queuedMovementCount = 0;
+								queuedMovementTail = queuedMovementHead;
 
 								// Directly set the weight angle PID target
 								PID_WeightAngleWithMotorSpeed.target = cmd.acceleration * movementSide;
