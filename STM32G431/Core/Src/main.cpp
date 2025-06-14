@@ -331,17 +331,19 @@ uint8_t sendMessage;
 
 
 
-#define BUFFER_SIZE 100
+#define MAX_CMD_HISTORY 100
 
-uint32_t intervalBuffer[BUFFER_SIZE];
-uint32_t bufferIndex = 0;
-uint32_t bufferCount = 0;  // Track how many valid values are stored
+MotionCommand commandHistory[MAX_CMD_HISTORY];
+uint8_t commandHistoryHead = 0;
 
-// Compute min, max, and mean
-uint32_t min ;
-uint32_t max ;
-uint64_t sum ;
-uint32_t mean;
+void logReceivedCommand(MotionCommand* cmd) {
+	commandHistory[commandHistoryHead] = *cmd;
+	commandHistoryHead = (commandHistoryHead + 1) % MAX_CMD_HISTORY;
+}
+
+
+
+
 
 
 
@@ -489,17 +491,17 @@ int main(void) {
 			// If we still have queued movements, and there's currently none running
 			if (queuedMovementCount && !movement.running){
 
+				// Pointer to next movement
+				struct MovementStep* nextMovement = &queuedMovements[queuedMovementTail];
+
 				// If it's time for the next one
-				if (TIM2->CNT > queuedMovements[0].startTime){
+				if (TIM2->CNT > nextMovement->startTime){
 
 					// Start next queued movement
-					startMovement(queuedMovements[0]);
+					startMovement(*nextMovement);
 
-					// Move queued movements down a row
-					memmove(&queuedMovements[0], &queuedMovements[1], sizeof(struct MovementStep) * (MAX_QUE_LENGTH - 1));
-
-					// Zero out the last element
-					memset(&queuedMovements[MAX_QUE_LENGTH - 1], 0, sizeof(struct MovementStep));
+					// Point to next movement in line
+					queuedMovementTail = (queuedMovementTail + 1) % MAX_QUE_LENGTH;
 
 					// Decrement queued movement counter
 					queuedMovementCount--;
@@ -617,8 +619,11 @@ int main(void) {
 					// If we got a valid CRC
 					if (cmd.crc == CRC_Calculate((uint8_t*)&cmd, sizeof(cmd) - 2)){
 
-						// Switch byte orders so QLab values make sense
-						cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
+					// Log command in circular buffer
+					logReceivedCommand(&cmd);
+
+					// If we have to do something
+					if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
 
 						// If we have to do something
 						if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
@@ -650,8 +655,9 @@ int main(void) {
 								queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
 							}
 
-							// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
-							else if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
+							// Clear movement queue
+							queuedMovementCount = 0;
+							queuedMovementTail = queuedMovementHead;
 
 								// Base direction to move on current position and commanded direction
 								movementSide = 0;
@@ -667,8 +673,9 @@ int main(void) {
 								startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
 							}
 
-							// Or overwrite the current movement
-							else if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
+							// Clear movement queue
+							queuedMovementCount = 0;
+							queuedMovementTail = queuedMovementHead;
 
 								// Check movementSide
 								movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;

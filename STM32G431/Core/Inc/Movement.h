@@ -57,6 +57,12 @@ struct MovementStep {
 
 MovementStep queuedMovements[MAX_QUE_LENGTH];
 uint8_t queuedMovementCount;
+uint8_t queuedMovementHead;
+uint8_t queuedMovementTail;
+
+
+
+
 uint8_t lastCueStarted;
 
 
@@ -73,7 +79,8 @@ void startMovement(struct MovementStep step) {
 
 void queueMovement(struct MovementStep step, float delay){
 	step.startTime = TIM2->CNT + 1000000 * delay;
-	queuedMovements[queuedMovementCount] = step;
+	queuedMovements[queuedMovementHead] = step;
+	queuedMovementHead = (queuedMovementHead + 1) % MAX_QUE_LENGTH;
 	queuedMovementCount++;
 }
 
