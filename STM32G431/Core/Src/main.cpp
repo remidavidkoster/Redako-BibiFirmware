@@ -343,6 +343,7 @@ void logReceivedCommand(MotionCommand* cmd) {
 
 
 
+uint32_t CRC_MismatchCounter;
 
 
 

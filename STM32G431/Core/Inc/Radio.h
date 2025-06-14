@@ -67,7 +67,6 @@ enum {
 	COMMAND_DIRECT_SET_ANGLE_OUTWARDS = 19,
 	COMMAND_SHUTDOWN = 30,
 	COMMAND_LIGHTS_OFF = 31,
-	COMMAND_LIGHTS_ON = 32,
 	COMMAND_SHUTDOWN_SAFETY = 150
 };
 
@@ -75,7 +74,7 @@ enum {
 void NRF_Configurate() {
 	NRF24Config_t config;
 
-	config.rf_ch = 101;
+	config.rf_ch = 102;
 	config.rf_setup = RF_DR_250KBPS | RF_PWR_0DBM;
 	config.config = (1 << EN_CRC) | (1 << CRCO);
 	config.setup_aw = 3;
@@ -84,8 +83,8 @@ void NRF_Configurate() {
 	config.payload = sizeof(MotionCommand);
 
 	NRF_Init();
-	setRADDR((uint8_t *)"TCMfx");
-	setTADDR((uint8_t *)"TCMfx");
+	setRADDR((uint8_t *)"BibiX");
+	setTADDR((uint8_t *)"BibiX");
 
 	NRF_Config(config);
 }
