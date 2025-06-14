@@ -21,6 +21,7 @@
 #include "Radio.h"
 #include "encoder.h"
 #include "quintic.h"
+#include "CRC.h"
 
 void SystemClock_Config(void);
 
@@ -147,16 +148,16 @@ KalmanFilter kf;
 
 
 void kalman_init(KalmanFilter *kf) {
-    kf->x[0] = 0.0f; // position
-    kf->x[1] = 0.0f; // velocity
-    kf->x[2] = 0.0f; // acceleration
+	kf->x[0] = 0.0f; // position
+	kf->x[1] = 0.0f; // velocity
+	kf->x[2] = 0.0f; // acceleration
 
-    // Initialize P to identity (can scale if needed)
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            kf->P[i][j] = (i == j) ? 1.0f : 0.0f;
-        }
-    }
+	// Initialize P to identity (can scale if needed)
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			kf->P[i][j] = (i == j) ? 1.0f : 0.0f;
+		}
+	}
 }
 
 #define DT (1.0f / SAMPLE_FREQUENCY) // Time step (adjust as needed)
@@ -168,80 +169,80 @@ float Q[3] = {1e-4f, 1e-3f, 1e-2f}; // Process noise for x, v, a
 
 
 void kalman_update(KalmanFilter *kf, float z_measured) {
-    // Motion model
-    float A[3][3] = {
-        {1.0f, DT, 0.5f * DT * DT},
-        {0.0f, 1.0f, DT},
-        {0.0f, 0.0f, 1.0f}
-    };
+	// Motion model
+	float A[3][3] = {
+			{1.0f, DT, 0.5f * DT * DT},
+			{0.0f, 1.0f, DT},
+			{0.0f, 0.0f, 1.0f}
+	};
 
-    float H[3] = {1.0f, 0.0f, 0.0f}; // Only position is observed
+	float H[3] = {1.0f, 0.0f, 0.0f}; // Only position is observed
 
-    float x_pred[3];
-    float P_pred[3][3];
+	float x_pred[3];
+	float P_pred[3][3];
 
-    // Predict state: x_pred = A * x
-    for (int i = 0; i < 3; i++) {
-        x_pred[i] = 0.0f;
-        for (int j = 0; j < 3; j++) {
-            x_pred[i] += A[i][j] * kf->x[j];
-        }
-    }
+	// Predict state: x_pred = A * x
+	for (int i = 0; i < 3; i++) {
+		x_pred[i] = 0.0f;
+		for (int j = 0; j < 3; j++) {
+			x_pred[i] += A[i][j] * kf->x[j];
+		}
+	}
 
-    // Predict covariance: P_pred = A * P * A^T + Q
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            P_pred[i][j] = 0.0f;
-            for (int k = 0; k < 3; k++) {
-                for (int l = 0; l < 3; l++) {
-                    P_pred[i][j] += A[i][k] * kf->P[k][l] * A[j][l]; // Correct matrix mult
-                }
-            }
-            if (i == j) {
-                P_pred[i][j] += Q[i]; // Add process noise to diagonal
-            }
-        }
-    }
+	// Predict covariance: P_pred = A * P * A^T + Q
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			P_pred[i][j] = 0.0f;
+			for (int k = 0; k < 3; k++) {
+				for (int l = 0; l < 3; l++) {
+					P_pred[i][j] += A[i][k] * kf->P[k][l] * A[j][l]; // Correct matrix mult
+				}
+			}
+			if (i == j) {
+				P_pred[i][j] += Q[i]; // Add process noise to diagonal
+			}
+		}
+	}
 
-    // Kalman Gain: K = P_pred * H^T / (H * P_pred * H^T + R)
-    float S = R;
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            S += H[i] * P_pred[i][j] * H[j];
-        }
-    }
+	// Kalman Gain: K = P_pred * H^T / (H * P_pred * H^T + R)
+	float S = R;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			S += H[i] * P_pred[i][j] * H[j];
+		}
+	}
 
-    float K[3];
-    for (int i = 0; i < 3; i++) {
-        K[i] = 0.0f;
-        for (int j = 0; j < 3; j++) {
-            K[i] += P_pred[i][j] * H[j];
-        }
-        K[i] /= S;
-    }
+	float K[3];
+	for (int i = 0; i < 3; i++) {
+		K[i] = 0.0f;
+		for (int j = 0; j < 3; j++) {
+			K[i] += P_pred[i][j] * H[j];
+		}
+		K[i] /= S;
+	}
 
-    // Update state: x = x_pred + K * (z - H * x_pred)
-    float z_pred = 0.0f;
-    for (int i = 0; i < 3; i++) {
-        z_pred += H[i] * x_pred[i];
-    }
+	// Update state: x = x_pred + K * (z - H * x_pred)
+    		float z_pred = 0.0f;
+    		for (int i = 0; i < 3; i++) {
+    			z_pred += H[i] * x_pred[i];
+    		}
 
-    float y = z_measured - z_pred;
+    		float y = z_measured - z_pred;
 
-    for (int i = 0; i < 3; i++) {
-        kf->x[i] = x_pred[i] + K[i] * y;
-    }
+    		for (int i = 0; i < 3; i++) {
+    			kf->x[i] = x_pred[i] + K[i] * y;
+    		}
 
-    // Update covariance: P = P_pred - K * H * P_pred
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            float KH = 0.0f;
-            for (int k = 0; k < 3; k++) {
-                KH += K[i] * H[k] * P_pred[k][j];
-            }
-            kf->P[i][j] = P_pred[i][j] - KH;
-        }
-    }
+    		// Update covariance: P = P_pred - K * H * P_pred
+    		for (int i = 0; i < 3; i++) {
+    			for (int j = 0; j < 3; j++) {
+    				float KH = 0.0f;
+    				for (int k = 0; k < 3; k++) {
+    					KH += K[i] * H[k] * P_pred[k][j];
+    				}
+    				kf->P[i][j] = P_pred[i][j] - KH;
+    			}
+    		}
 }
 
 
@@ -368,6 +369,7 @@ int main(void) {
 	MX_SPI3_Init();
 	MX_TIM4_Init();
 	MX_TIM8_Init();
+	CRC_Init_16_ARC();
 
 
 	// Start microsecond timer, overflows after 71 minutes.
@@ -402,11 +404,14 @@ int main(void) {
 	// Get Bibi ID
 	BIBI_Number = BIBI_GetID();
 
+	// Overwrite for debugging
+	BIBI_Number = 1;
+
 	// Initialize IMU
 	IMU_Init();
 
 	// Config radio
-	NRF_ConfigMotionControlled();
+	NRF_Configurate();
 
 	// Setup magnetic encoder
 	ENC_Setup();
@@ -518,7 +523,7 @@ int main(void) {
 					lastDiaboloPosition = 0;
 					lastDiaboloSpeed = 0;
 					notYetMoved = 0;
-//				    kalman_init(&kf);
+					//				    kalman_init(&kf);
 				}
 
 				// Turn on speed PID
@@ -575,35 +580,30 @@ int main(void) {
 
 
 
-//				// Store new interval in circular buffer
-//				intervalBuffer[bufferIndex] = NRF_ReceiveInterval;
-//				bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
-//
-//				// Update count until buffer fills
-//				if (bufferCount < BUFFER_SIZE) {
-//				    bufferCount++;
-//				}
-//
-//				// Compute min, max, and mean
-//				min = intervalBuffer[0];
-//				max = intervalBuffer[0];
-//				sum = 0;
-//
-//				for (uint32_t i = 0; i < bufferCount; i++) {
-//				    uint32_t val = intervalBuffer[i];
-//				    if (val < min) min = val;
-//				    if (val > max) max = val;
-//				    sum += val;
-//				}
-//
-//				mean = (uint32_t)(sum / bufferCount);
-//
-//
-
-
-
-
-
+				//				// Store new interval in circular buffer
+				//				intervalBuffer[bufferIndex] = NRF_ReceiveInterval;
+				//				bufferIndex = (bufferIndex + 1) % BUFFER_SIZE;
+				//
+				//				// Update count until buffer fills
+				//				if (bufferCount < BUFFER_SIZE) {
+				//				    bufferCount++;
+				//				}
+				//
+				//				// Compute min, max, and mean
+				//				min = intervalBuffer[0];
+				//				max = intervalBuffer[0];
+				//				sum = 0;
+				//
+				//				for (uint32_t i = 0; i < bufferCount; i++) {
+				//				    uint32_t val = intervalBuffer[i];
+				//				    if (val < min) min = val;
+				//				    if (val > max) max = val;
+				//				    sum += val;
+				//				}
+				//
+				//				mean = (uint32_t)(sum / bufferCount);
+				//
+				//
 
 
 				// If the new command isn't the same as the last one
@@ -614,110 +614,116 @@ int main(void) {
 					memcpy(&cmd, buffer, sizeof(MotionCommand));
 					memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
 
-					// Switch byte orders so QLab values make sense
-					cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
-					cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
+					// If we got a valid CRC
+					if (cmd.crc == CRC_Calculate((uint8_t*)&cmd, sizeof(cmd) - 2)){
 
-					// If we have to do something
-					if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
+						// Switch byte orders so QLab values make sense
+						cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
 
-						// If we get a queued movement command
-						if (cmd.command == COMMAND_QUEUE_LEFT_SIDE || cmd.command == COMMAND_QUEUE_RIGHT_SIDE){
+						// If we have to do something
+						if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
 
-							// Check movementSide
-							movementSide = (cmd.command == COMMAND_QUEUE_LEFT_SIDE) ? 1 : -1;
+							// Switch byte orders so QLab values make sense
+							cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
 
-							// Queue movement
-							queueMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
-						}
+							// If we get a queued movement command
+							if (cmd.command == COMMAND_QUEUE_LEFT_SIDE || cmd.command == COMMAND_QUEUE_RIGHT_SIDE){
 
-						// If we get a queued relative movement command
-						if (cmd.command == COMMAND_RELATIVE_INWARDS || cmd.command == COMMAND_RELATIVE_OUTWARDS){
+								// Check movementSide
+								movementSide = (cmd.command == COMMAND_QUEUE_LEFT_SIDE) ? 1 : -1;
 
-							// Base direction to move, on current position, and commanded direction (only works once the diabolo is 'in the field' and knows what side he's on)
-							movementSide = 0;
-							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = 1;
-							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = -1;
-							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = -1;
-							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = 1;
-
-							// Queue movement
-							queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
-						}
-
-						// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
-						if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
-
-							// Base direction to move on current position and commanded direction
-							movementSide = 0;
-							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = 1;
-							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = -1;
-							if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = -1;
-							if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = 1;
-
-							// Clear movement queue
-							queuedMovementCount = 0;
-
-							// Queue movement
-							startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
-						}
-
-						// Or overwrite the current movement
-						if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
-
-							// Check movementSide
-							movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;
-
-							// Clear movement queue
-							queuedMovementCount = 0;
-
-							// Start new movement directly
-							startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
-						}
-
-						// If we directly want to command the counter weight angle for smoother but less controlled motion
-						if (cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS || cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS){
-
-							// Turn off speed PID
-							PID_BibiSpeedWithWeightAngle.on = 0;
-
-							// Base direction to move on current position and commanded direction
-							movementSide = 0;
-							if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = 1;
-							if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = -1;
-							if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = -1;
-							if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = 1;
-
-							// Directly set the weight angle PID target
-							PID_WeightAngleWithMotorSpeed.target = cmd.acceleration * movementSide;
-						}
-
-						// If we get a shutdown command with the correct safety position value
-						if (cmd.command == COMMAND_SHUTDOWN && cmd.newPosition == COMMAND_SHUTDOWN_SAFETY){
-
-							// If acceleration value is 1, we do a light-less turnoff
-							if (cmd.acceleration == 1){
-								HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+								// Queue movement
+								queueMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
 							}
 
-							// Turn Bibis off
-							SYS_Shutdown();
-						}
+							// If we get a queued relative movement command
+							else if (cmd.command == COMMAND_RELATIVE_INWARDS || cmd.command == COMMAND_RELATIVE_OUTWARDS){
 
-						// If we have to turn the battery lights off
-						if (cmd.command == COMMAND_LIGHTS_OFF){
+								// Base direction to move, on current position, and commanded direction (only works once the diabolo is 'in the field' and knows what side he's on)
+								movementSide = 0;
+								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = 1;
+								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = -1;
+								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = -1;
+								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = 1;
 
-							// Simply set brightness to 0. Still feels dangerous not to have an indication they're still on!
-							RGB_Brightness = 0;
-							RGB_On = 0;
-						}
+								// Queue movement
+								queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
+							}
 
-						// If we have to turn the battery lights back on
-						if (cmd.command == COMMAND_LIGHTS_ON){
+							// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
+							else if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
 
-							// Simply set brightness to 1
-							RGB_Brightness = 1;
-							RGB_On = 1;
+								// Base direction to move on current position and commanded direction
+								movementSide = 0;
+								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = 1;
+								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = -1;
+								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = -1;
+								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = 1;
+
+								// Clear movement queue
+								queuedMovementCount = 0;
+
+								// Queue movement
+								startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
+							}
+
+							// Or overwrite the current movement
+							else if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
+
+								// Check movementSide
+								movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;
+
+								// Clear movement queue
+								queuedMovementCount = 0;
+
+								// Start new movement directly
+								startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
+							}
+
+							// If we directly want to command the counter weight angle for smoother but less controlled motion
+							else if (cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS || cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS){
+
+								// Turn off speed PID
+								PID_BibiSpeedWithWeightAngle.on = 0;
+
+								// Base direction to move on current position and commanded direction
+								movementSide = 0;
+								if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = 1;
+								if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = -1;
+								if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = -1;
+								if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = 1;
+
+								// Directly set the weight angle PID target
+								PID_WeightAngleWithMotorSpeed.target = cmd.acceleration * movementSide;
+							}
+
+							// If we get a shutdown command with the correct safety position value
+							else if (cmd.command == COMMAND_SHUTDOWN && cmd.newPosition == COMMAND_SHUTDOWN_SAFETY){
+
+								// If acceleration value is 1, we do a light-less turnoff
+								if (cmd.acceleration == 1){
+									HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+								}
+
+								// Turn Bibis off
+								SYS_Shutdown();
+							}
+
+							// If we have to turn the battery lights off
+							else if (cmd.command == COMMAND_LIGHTS_OFF){
+
+								// Simply set brightness to 0. Still feels dangerous not to have an indication they're still on!
+								RGB_Brightness = 0;
+								RGB_On = 0;
+							}
+
+							// If we have to turn the battery lights back on
+							else if (cmd.command == COMMAND_LIGHTS_ON){
+
+								// Simply set brightness to 1
+								RGB_Brightness = 1;
+								RGB_On = 1;
+							}
 						}
 					}
 				}
@@ -831,19 +837,19 @@ int main(void) {
 			MOT_SetPhaseVoltage(PID_MotorPositionWithVoltage.on ? phaseVoltage : 0, electricalAngle);
 
 
-//			kalman_update(&kf, diaboloPosition);
+			//			kalman_update(&kf, diaboloPosition);
 
 
 
-//			// Print debug data
-//			myData.a = diaboloPosition;
-//			myData.b = diaboloSpeed;
-//			myData.c = diaboloAcceleration;
-//			myData.d = kf.x[0];
-//			myData.e = kf.x[1];
-//			myData.f = kf.x[2];
-//
-//			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
+			//			// Print debug data
+			//			myData.a = diaboloPosition;
+			//			myData.b = diaboloSpeed;
+			//			myData.c = diaboloAcceleration;
+			//			myData.d = kf.x[0];
+			//			myData.e = kf.x[1];
+			//			myData.f = kf.x[2];
+			//
+			//			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
 
 
 			// Update timing variables

@@ -27,50 +27,6 @@ uint8_t spiTransfer(uint8_t txByte) {
 }
 
 
-//
-//uint8_t softSpiTransfer(uint8_t shOut) {
-//	uint8_t shIn = 0;
-//	for (int i = 0; i < 8; i++) {
-//		// Data high / low
-//		if (shOut > 127) outHigh();//NRF_MOSI_GPIO_Port->BSRR = NRF_MOSI_Pin;
-//		else outLow();//NRF_MOSI_GPIO_Port->BSRR = NRF_MOSI_Pin << 16;
-//
-//		shIn += readInPin();//((NRF_MISO_GPIO_Port->IDR & NRF_MISO_Pin) != (uint32_t)GPIO_PIN_RESET);
-//
-//		// Clock high / low
-//		clkHigh();//NRF_SCK_GPIO_Port->BSRR = NRF_SCK_Pin;
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		clkLow();//NRF_SCK_GPIO_Port->BSRR = NRF_SCK_Pin << 16;
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//		asm("nop");
-//
-//		shIn <<= (i != 7);
-//		shOut <<= 1;
-//	}
-//	return shIn;
-//}
-
 
 void transferSync(uint8_t *dataout, uint8_t *datain, uint8_t len) {
 	uint8_t i;
@@ -99,16 +55,20 @@ void NRF_Init() {
 // Sets the important registers in the MiRF module and powers the module
 // in receiving mode
 // NB: channel and payload must be set now.
-void NRF_Config(uint8_t rfSetup) {
-	// Set RF channel
-	configRegister(RF_CH, channel);
+void NRF_Config(NRF24Config_t config){
 
-	// Set length of incoming payload
+	payload = config.payload;
+
+	configRegister(RF_CH, config.rf_ch);
 	configRegister(RX_PW_P0, payload);
 	configRegister(RX_PW_P1, payload);
-	configRegister(EN_AA, 0); // No auto ack?
-	configRegister(SETUP_RETR, 0B00000000); // No retransmits?
-	configRegister(RF_SETUP, rfSetup);
+	configRegister(EN_AA, config.en_aa);
+	configRegister(SETUP_RETR, config.setup_retr);
+	configRegister(RF_SETUP, config.rf_setup);
+	configRegister(SETUP_AW, config.setup_aw);
+
+	mirf_CONFIG = config.config;
+
 	// Start receiver
 	powerUpRx();
 	flushRx();

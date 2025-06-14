@@ -28,7 +28,7 @@ void NRF_ConfigSyma() {
 	setTADDR(fixedSmall_rx_tx_addr);
 	payload = SYMAPAYLOADSIZE;
 	channel = 0x32;
-	NRF_Config(RF_DR_250KBPS | RF_PWR_0DBM);
+//	NRF_Config(RF_DR_250KBPS | RF_PWR_0DBM);
 }
 
 

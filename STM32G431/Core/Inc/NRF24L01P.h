@@ -103,6 +103,18 @@ extern uint8_t mirf_CONFIG;
 
 /// NRF24L01 stuff
 
+
+typedef struct {
+    uint8_t rf_ch;
+    uint8_t rf_setup;
+    uint8_t config;
+    uint8_t en_aa;
+    uint8_t setup_aw;
+    uint8_t setup_retr;
+    uint8_t payload;
+} NRF24Config_t;
+
+
 // In sending mode.
 extern uint8_t PTX;
 
@@ -118,7 +130,7 @@ extern "C" {
 
 uint8_t spiTransfer(uint8_t working);
 void NRF_Init();
-void NRF_Config(uint8_t rfSetup);
+void NRF_Config(NRF24Config_t config);
 void NRF_Send(uint8_t *value);
 void setRADDR(uint8_t * adr);
 void setTADDR(uint8_t * adr);
@@ -139,20 +151,7 @@ void powerUpTx();
 void NRF_PowerDown();
 void setDataStuff(uint8_t dataStuff);
 
-void csnHigh();
-void csnLow();
 
-void ceHigh();
-void ceLow();
-
-void clkHigh();
-
-void clkLow();
-
-
-void outHigh();
-
-void outLow();
 
 uint8_t readInPin();
 
