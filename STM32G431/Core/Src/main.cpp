@@ -27,14 +27,14 @@ void SystemClock_Config(void);
 
 
 float motorSpeedTarget;
-double motorAngleFullDeg;
+float motorAngleFullDeg; //double
 
-double electricalAngleTarget;
-double electricalAngle;
+float electricalAngleTarget; //double
+float electricalAngle; //double
 
-double diaboloAngleFullDeg;
-double diaboloPosition;
-double lastDiaboloPosition;
+float diaboloAngleFullDeg; //double
+float diaboloPosition; //double
+float lastDiaboloPosition; //double
 
 float diaboloZeroPosition;
 
@@ -69,8 +69,8 @@ typedef struct {
 
 	float limit;
 
-	double target;
-	double lastTarget;
+	float target; //double
+	float lastTarget; //double
 	float reset_threshold;
 
 	float on;
@@ -260,7 +260,7 @@ float accelerationTargetFiltered;
 
 
 
-float runPID(volatile PIDController *pid, double currentValue) {
+float runPID(volatile PIDController *pid, float currentValue) {
 	const float dt = 1.0f / SAMPLE_FREQUENCY; // 0.0001 seconds
 
 	pid->error = currentValue - pid->target;
@@ -344,6 +344,28 @@ void logReceivedCommand(MotionCommand* cmd) {
 
 
 uint32_t CRC_MismatchCounter;
+
+uint32_t strangeCommandCounter;
+
+// Returns 1 if this command makes sense
+uint8_t CMD_SanityCheck(MotionCommand cmd){
+
+	// Increment in case we return early
+	strangeCommandCounter++;
+
+	// Acceleration shouldn't ever exceed 120
+	if (cmd.acceleration > 125) return 0;
+
+	// Movement limited to 10 meters now. Prevents rogue commands from passing through
+	if (cmd.newPosition > 1000) return 0;
+
+	// Decrement again because it passed the checks
+	strangeCommandCounter--;
+
+	// Valid message
+	return 1;
+}
+
 
 
 
@@ -578,134 +600,144 @@ int main(void) {
 				NRF_ReceiveInterval = TIM2->CNT - NRF_ReceiveTimestamp;
 				NRF_ReceiveTimestamp = TIM2->CNT;
 
-				// If the new command isn't the same as the last one
-				if (memcmp(&lastCmd, buffer, sizeof(MotionCommand))){
+				// Copy the buffer to the command data structure
+				MotionCommand cmd;
+				memcpy(&cmd, buffer, sizeof(MotionCommand));
 
-					// Copy the buffer to the command data structure
-					MotionCommand cmd;
-					memcpy(&cmd, buffer, sizeof(MotionCommand));
+				// Check if the CRC is valid
+				if (cmd.crc == CRC_Calculate((uint8_t*)&cmd, sizeof(cmd) - 2)){
 
-					// Log command in circular buffer
-					logReceivedCommand(&cmd);
+					// Get flags from command bits
+					uint8_t flags = (cmd.command & 0b11100000) >> 5;
 
-					// If we got a valid CRC
-					if (cmd.crc == CRC_Calculate((uint8_t*)&cmd, sizeof(cmd) - 2)){
+					// Remove flags from command byte
+					cmd.command &= 0b11111;
 
-						// Do this here, to prevent invalid commands from re-starting a previous command
+					// Switch byte orders so QLab values make sense
+					cmd.bibiNumber = (cmd.bibiNumber << 8) | (cmd.bibiNumber >> 8);
+					cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
+
+					// Clear CRC for comparison
+					cmd.crc = 0;
+
+					// If the new command isn't the same as the last one
+					if (memcmp(&lastCmd, &cmd, sizeof(MotionCommand))){
+
+						// Copy it over as new last command
 						memcpy(&lastCmd, &cmd, sizeof(MotionCommand));
 
-						// If we have to do something
-						if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
+						// Log command in circular buffer
+						logReceivedCommand(&cmd);
 
-							// Switch byte orders so QLab values make sense
-							cmd.newPosition = (cmd.newPosition << 8) | (cmd.newPosition >> 8);
+						// Pass the message through the sanity check
+						if (CMD_SanityCheck(cmd)){
 
-							// If we get a queued movement command
-							if (cmd.command == COMMAND_QUEUE_LEFT_SIDE || cmd.command == COMMAND_QUEUE_RIGHT_SIDE){
+							// If we have to do something
+							if (cmd.bibiNumber == BIBI_Number || cmd.bibiNumber == 0 || (cmd.bibiNumber & (1 << (4 + BIBI_Number)))){
 
-								// Check movementSide
-								movementSide = (cmd.command == COMMAND_QUEUE_LEFT_SIDE) ? 1 : -1;
+								// If we get a queued movement command
+								if (cmd.command == COMMAND_QUEUE_LEFT_SIDE || cmd.command == COMMAND_QUEUE_RIGHT_SIDE){
 
-								// Queue movement
-								queueMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
-							}
+									// Check movementSide
+									movementSide = (cmd.command == COMMAND_QUEUE_LEFT_SIDE) ? 1 : -1;
 
-							// If we get a queued relative movement command
-							else if (cmd.command == COMMAND_RELATIVE_INWARDS || cmd.command == COMMAND_RELATIVE_OUTWARDS){
-
-								// Base direction to move, on current position, and commanded direction (only works once the diabolo is 'in the field' and knows what side he's on)
-								movementSide = 0;
-								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = 1;
-								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = -1;
-								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = -1;
-								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = 1;
-
-								// Queue movement
-								queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
-							}
-
-							// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
-							else if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
-
-								// Base direction to move on current position and commanded direction
-								movementSide = 0;
-								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = 1;
-								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = -1;
-								if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = -1;
-								if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = 1;
-
-								// Clear movement queue
-								queuedMovementCount = 0;
-								queuedMovementTail = queuedMovementHead;
-
-								// Queue movement
-								startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
-							}
-
-							// Or overwrite the current movement
-							else if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
-
-								// Check movementSide
-								movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;
-
-								// Clear movement queue
-								queuedMovementCount = 0;
-								queuedMovementTail = queuedMovementHead;
-
-								// Start new movement directly
-								startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
-							}
-
-							// If we directly want to command the counter weight angle for smoother but less controlled motion
-							else if (cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS || cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS){
-
-								// Turn off speed PID
-								PID_BibiSpeedWithWeightAngle.on = 0;
-
-								// Base direction to move on current position and commanded direction
-								movementSide = 0;
-								if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = 1;
-								if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = -1;
-								if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = -1;
-								if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = 1;
-
-								// Clear movement queue
-								queuedMovementCount = 0;
-								queuedMovementTail = queuedMovementHead;
-
-								// Directly set the weight angle PID target
-								PID_WeightAngleWithMotorSpeed.target = cmd.acceleration * movementSide;
-							}
-
-							// If we get a shutdown command with the correct safety position value
-							else if (cmd.command == COMMAND_SHUTDOWN && cmd.newPosition == COMMAND_SHUTDOWN_SAFETY){
-
-								// If acceleration value is 1, we do a light-less turnoff
-								if (cmd.acceleration == 1){
-									HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+									// Queue movement
+									queueMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
 								}
 
-								// Turn Bibis off
-								SYS_Shutdown();
-							}
+								// If we get a queued relative movement command
+								else if (cmd.command == COMMAND_RELATIVE_INWARDS || cmd.command == COMMAND_RELATIVE_OUTWARDS){
 
-							// If we have to turn the battery lights off
-							else if (cmd.command == COMMAND_LIGHTS_OFF){
+									// Base direction to move, on current position, and commanded direction (only works once the diabolo is 'in the field' and knows what side he's on)
+									movementSide = 0;
+									if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = 1;
+									if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS)  movementSide = -1;
+									if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = -1;
+									if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS) movementSide = 1;
 
-								// Simply set brightness to 0. Still feels dangerous not to have an indication they're still on!
-								RGB_Brightness = 0;
-								RGB_On = 0;
-							}
+									// Queue movement
+									queueMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f}, 0);
+								}
 
-							// If we have to turn the battery lights back on
-							else if (cmd.command == COMMAND_LIGHTS_ON){
+								// If we get a direct queued relative movement command (only works once the diabolo is 'in the field' and knows what side he's on)
+								else if (cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT || cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT){
 
-								// Simply set brightness to 1
-								RGB_Brightness = 1;
-								RGB_On = 1;
+									// Base direction to move on current position and commanded direction
+									movementSide = 0;
+									if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = 1;
+									if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_INWARDS_DIRECT)  movementSide = -1;
+									if (diaboloPosition >  0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = -1;
+									if (diaboloPosition < -0.1f && cmd.command == COMMAND_RELATIVE_OUTWARDS_DIRECT) movementSide = 1;
+
+									// Clear movement queue
+									queuedMovementCount = 0;
+									queuedMovementTail = queuedMovementHead;
+
+									// Queue movement
+									startMovement((struct MovementStep){diaboloPosition + cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
+								}
+
+								// Or overwrite the current movement
+								else if (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE || cmd.command == COMMAND_MOVEMENT_RIGHT_SIDE){
+
+									// Check movementSide
+									movementSide = (cmd.command == COMMAND_MOVEMENT_LEFT_SIDE) ? 1 : -1;
+
+									// Clear movement queue
+									queuedMovementCount = 0;
+									queuedMovementTail = queuedMovementHead;
+
+									// Start new movement directly
+									startMovement((struct MovementStep){cmd.newPosition / 100.0f * movementSide, cmd.maxSpeed / 100.0f, cmd.acceleration / 200.0f});
+								}
+
+								// If we directly want to command the counter weight angle for smoother but less controlled motion
+								else if (cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS || cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS){
+
+									// Turn off speed PID
+									PID_BibiSpeedWithWeightAngle.on = 0;
+
+									// Base direction to move on current position and commanded direction
+									movementSide = 0;
+									if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = 1;
+									if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_INWARDS)  movementSide = -1;
+									if (diaboloPosition >  0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = -1;
+									if (diaboloPosition < -0.1f && cmd.command == COMMAND_DIRECT_SET_ANGLE_OUTWARDS) movementSide = 1;
+
+									// Clear movement queue
+									queuedMovementCount = 0;
+									queuedMovementTail = queuedMovementHead;
+
+									// Directly set the weight angle PID target
+									PID_WeightAngleWithMotorSpeed.target = cmd.acceleration * movementSide;
+								}
+
+								// If we get a shutdown command with the correct safety position value
+								else if (cmd.command == COMMAND_SHUTDOWN && cmd.newPosition == COMMAND_SHUTDOWN_SAFETY){
+
+									// If acceleration value is 1, we do a light-less turnoff
+									if (cmd.acceleration == 1){
+										HAL_GPIO_WritePin(SELF_TURN_ON_GPIO_Port, SELF_TURN_ON_Pin, (GPIO_PinState)0);
+									}
+
+									// Turn Bibis off
+									SYS_Shutdown();
+								}
+
+								// If we have to turn the battery lights off
+								else if (cmd.command == COMMAND_LIGHTS_OFF){
+
+									// Simply set brightness to 0. Still feels dangerous not to have an indication they're still on!
+									RGB_Brightness = 0;
+									RGB_On = 0;
+								}
 							}
 						}
 					}
+				}
+				else {
+					// Count mismatches in RAM
+					CRC_MismatchCounter++;
 				}
 			}
 
@@ -822,14 +854,14 @@ int main(void) {
 
 
 			//			// Print debug data
-			//			myData.a = diaboloPosition;
-			//			myData.b = diaboloSpeed;
-			//			myData.c = diaboloAcceleration;
-			//			myData.d = kf.x[0];
-			//			myData.e = kf.x[1];
-			//			myData.f = kf.x[2];
-			//
-			//			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
+			myData.a = microsUsed;
+			myData.b = 0;//diaboloSpeed;
+			myData.c = 0;//diaboloAcceleration;
+			myData.d = 0;//kf.x[0];
+			myData.e = 0;//kf.x[1];
+			myData.f = 0;//kf.x[2];
+
+			printFloats(myData.a, myData.b, myData.c, myData.d, myData.e, myData.f);
 
 
 			// Update timing variables

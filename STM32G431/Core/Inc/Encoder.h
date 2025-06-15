@@ -15,7 +15,7 @@ uint32_t lastRawAngle = 0;
 
 
 float ENC_LastAngleRad;
-double ENC_LastFullAngleRad;
+float ENC_LastFullAngleRad; //double
 
 
 
@@ -68,7 +68,8 @@ void ENC_Update(){
 	if(abs(d_angle) > (0.8f*_2PI) ) ENC_FullRotations += ( d_angle > 0 ) ? -1 : 1;
 	ENC_LastAngleRad = val;
 
-	ENC_LastFullAngleRad = (double)ENC_FullRotations * _2PI + ENC_LastAngleRad;
+//	ENC_LastFullAngleRad = (double)ENC_FullRotations * _2PI + ENC_LastAngleRad;
+	ENC_LastFullAngleRad = (float)ENC_FullRotations * _2PI + ENC_LastAngleRad;
 
 	angleTimer = TIM4->CNT;
 }
