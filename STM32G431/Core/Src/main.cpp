@@ -134,6 +134,34 @@ volatile PIDController PID_BibiPositionWithBibiSpeed = {
 
 
 
+void MAD_Update(){
+
+	// Read accelerometer and gyro data
+	sensorXYZFloat gyro_data;
+	imu_data.accel = icm42670_read_accel_gyro(&imu, &gyro_data);
+	imu_data.gyro = gyro_data;
+
+	imu_data.gyroZerod.x = imu_data.gyro.x - gyro_offsets[0];
+	imu_data.gyroZerod.y = imu_data.gyro.y - gyro_offsets[1];
+	imu_data.gyroZerod.z = imu_data.gyro.z - gyro_offsets[2];
+
+	// Update the Madgwick filter with new IMU values. Coordinate system is translated to have roll align with the Z axis
+	filter.updateIMU(imu_data.gyroZerod.z, imu_data.gyroZerod.y, -imu_data.gyroZerod.x, imu_data.accel.z, imu_data.accel.y, -imu_data.accel.x);
+
+	// Get the roll angle
+	madgwick.currentAngleDeg = filter.getRoll();
+	madgwick.angleDelta = madgwick.currentAngleDeg - madgwick.anglePrev;
+	madgwick.anglePrev = madgwick.currentAngleDeg;
+
+	// Detect wrap-around and update turn counter, but only if the PID is on
+	if (PID_WeightAngleWithMotorSpeed.on){
+		if      (madgwick.angleDelta >  180.0f) madgwick.turns--; // Rotated backwards across 0°
+		else if (madgwick.angleDelta < -180.0f) madgwick.turns++; // Rotated forward across 360°
+	}
+
+	// Compute total angle
+	madgwick.angleFullDeg = madgwick.currentAngleDeg + 360.0f * madgwick.turns;
+}
 
 
 // State: [position, velocity, acceleration]
@@ -540,11 +568,12 @@ int main(void) {
 
 					// Turn on the PIDs, and set the zero position
 					PID_WeightAngleWithMotorSpeed.on = 1;
-					diaboloZeroPosition = diaboloPosition;
+					diaboloZeroPosition += diaboloPosition;
 					diaboloPosition = 0;
 					lastDiaboloPosition = 0;
 					lastDiaboloSpeed = 0;
 					notYetMoved = 0;
+					madgwick.turns = 0;
 					//				    kalman_init(&kf);
 				}
 
@@ -730,6 +759,17 @@ int main(void) {
 									// Simply set brightness to 0. Still feels dangerous not to have an indication they're still on!
 									RGB_Brightness = 0;
 									RGB_On = 0;
+								}
+
+								// If we have to turn the PID loops off, and grab hold of the counter weight
+								else if (cmd.command == COMMAND_HOLD){
+
+									// Turn weight angle PID off
+									PID_WeightAngleWithMotorSpeed.on = 0;
+									PID_BibiSpeedWithWeightAngle.on = 0;
+
+									// Reset not-yet-moved flag
+									notYetMoved = 1;
 								}
 							}
 						}
