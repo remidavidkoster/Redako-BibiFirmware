@@ -39,8 +39,10 @@ static inline uint8_t BIBI_GetID(void) {
         }
     }
 
-    // Override for backup Bibi 5
+    // Override for backup Bibis 5 & 1
 	if (*(uint32_t *)0x1FFF7590 == 0x320055) return 5;
+	if (*(uint32_t *)0x1FFF7590 == 0x32002c) return 1;
+
 
 	// In case no match, use Bibi number 1 (used for debugging)
     return 1;

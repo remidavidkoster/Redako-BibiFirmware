@@ -57,7 +57,7 @@ void sendFloats(FloatStruct *data) {
 
 uint8_t firstSendUart = 1;
 
-void UART2_SendDMA(uint8_t *data, uint16_t size) {
+void UART1_SendDMA(uint8_t *data, uint16_t size) {
 	// Reverse byte order for each float (little-endian to big-endian)
 	uint32_t *data_as_int = (uint32_t*)data;
 	uint16_t num_floats = size / sizeof(float);
@@ -110,20 +110,20 @@ float floats[6];
 
 void printFloats(float a) {
 	floats[0] = a;
-	UART2_SendDMA((uint8_t *)floats, 4);
+	UART1_SendDMA((uint8_t *)floats, 4);
 }
 
 void printFloats(float a, float b) {
 	floats[0] = a;
 	floats[1] = b;
-	UART2_SendDMA((uint8_t *)floats, 8);
+	UART1_SendDMA((uint8_t *)floats, 8);
 }
 
 void printFloats(float a, float b, float c) {
 	floats[0] = a;
 	floats[1] = b;
 	floats[2] = c;
-	UART2_SendDMA((uint8_t *)floats, 12);
+	UART1_SendDMA((uint8_t *)floats, 12);
 }
 
 void printFloats(float a, float b, float c, float d) {
@@ -131,7 +131,7 @@ void printFloats(float a, float b, float c, float d) {
 	floats[1] = b;
 	floats[2] = c;
 	floats[3] = d;
-	UART2_SendDMA((uint8_t *)floats, 16);
+	UART1_SendDMA((uint8_t *)floats, 16);
 }
 
 void printFloats(float a, float b, float c, float d, float e) {
@@ -140,7 +140,7 @@ void printFloats(float a, float b, float c, float d, float e) {
 	floats[2] = c;
 	floats[3] = d;
 	floats[4] = e;
-	UART2_SendDMA((uint8_t *)floats, 20);
+	UART1_SendDMA((uint8_t *)floats, 20);
 }
 
 void printFloats(float a, float b, float c, float d, float e, float f) {
@@ -150,7 +150,7 @@ void printFloats(float a, float b, float c, float d, float e, float f) {
 	floats[3] = d;
 	floats[4] = e;
 	floats[5] = f;
-	UART2_SendDMA((uint8_t *)floats, 24);
+	UART1_SendDMA((uint8_t *)floats, 24);
 }
 
 
